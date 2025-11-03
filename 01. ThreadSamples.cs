@@ -1,11 +1,23 @@
-﻿using System.CommandLine;
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 
-
+/// <summary>
+/// This sample demonstrates launching threads within C#. That's all
+/// <para>
+/// This launches 4 threads, each of which is the InstanceMethod with different values.
+/// The theads run through 2 loops, printing each number in the specified ranges.
+/// </para>
+/// </summary>
 public static class ThreadSamples
 {
+    /// <summary>
+    /// The instance method to run as independent threads in the sample. This is a synchronous method.
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="firstStart">The first start value.</param>
+    /// <param name="firstMax">The first maximum value, completing the first range.</param>
+    /// <param name="secondStart">The second start value.</param>
+    /// <param name="secondMax">The second maximum value, completing the second range.</param>
     public static void InstanceMethod(
         string identifier,
         int firstStart, int firstMax, int secondStart, int secondMax)
@@ -26,8 +38,10 @@ public static class ThreadSamples
         Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
-
-    public static void Run(ParseResult parseResult)
+    /// <summary>
+    /// Runs sample code for the sample.
+    /// </summary>
+    public static void Run()
     {
         Thread instanceCaller = new(new ThreadStart(() => InstanceMethod("Thread 1", 1, 5, 101, 105)));
         instanceCaller.Start();

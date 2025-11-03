@@ -1,235 +1,241 @@
-﻿using System.CommandLine;
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 
-public class IteratingTask
+
+
+/// <summary>
+/// This sample demonstrates using IEnumerable iterator to simulate async/await style
+/// </summary>
+public static class IterateTaskGeneratorSample
 {
-    public static IteratingTask CompletedTask
+
+    /// <summary>
+    /// The custom task class to represent work being done in the thead pool
+    /// </summary>
+    public class MyTask
     {
-        get
+        /// <summary>
+        /// Gets a completed task
+        /// </summary>
+        public static MyTask CompletedTask
         {
-            IteratingTask ret = new();
-            ret.SetResult();
-            return ret;
+            get
+            {
+                MyTask ret = new();
+                ret.SetResult();
+                return ret;
+            }
         }
-    }
 
 
-    private readonly SemaphoreSlim _synchronize = new(1);
+        /// <summary>
+        /// The semaphore used to synchronize between several threads
+        /// </summary>
+        private readonly SemaphoreSlim _synchronize = new(1);
 
-    private bool _completed = false;
+        /// <summary>
+        /// Flag indicating whether this task has completed yet
+        /// </summary>
+        private bool _completed = false;
 
-    private Exception? _exception = null;
+        /// <summary>
+        /// The exception that has occurred during the work, or <c>null</c> if no exception has occurred
+        /// </summary>
+        private Exception? _exception = null;
 
-    private Action? _continuation = null;
+        /// <summary>
+        /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
+        /// </summary>
+        private Action? _continuation = null;
 
-    private ExecutionContext? _executionContext = null;
+        /// <summary>
+        /// The execution context that the task information should be run under
+        /// </summary>
+        private ExecutionContext? _executionContext = null;
 
-    public bool IsCompleted
-    {
-        get
+        /// <summary>
+        /// Gets a value indicating whether this task has completed operations.
+        /// </summary>
+        /// <value>
+        /// Is <c>true</c> if this task has completed operatoins; otherwise, <c>false</c>.
+        /// </value>
+        public bool IsCompleted
+        {
+            get
+            {
+                _synchronize.Wait();
+                try
+                {
+                    return _completed;
+                }
+                finally
+                {
+                    _synchronize.Release();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Marks the task as complete, with or without an exception
+        /// </summary>
+        /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
+        /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
+        private void Complete(Exception? ex)
         {
             _synchronize.Wait();
             try
             {
-                return _completed;
+                if (_completed)
+                {
+                    throw new InvalidOperationException("Cannot complete an already completed task.");
+                }
+
+                _completed = true;
+                _exception = ex;
+
+                if (_continuation is not null)
+                {
+                    ThreadPool.QueueUserWorkItem(_ =>
+                    {
+                        if (_executionContext is null)
+                        {
+                            _continuation();
+                        }
+                        else
+                        {
+                            ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), _continuation);
+                        }
+                    });
+                }
             }
             finally
             {
                 _synchronize.Release();
             }
         }
-    }
 
-    private void Complete(Exception? ex)
-    {
-        _synchronize.Wait();
-        try
+        /// <summary>
+        /// Set the task as completed.
+        /// </summary>
+        public void SetResult()
+        {
+            Complete(null);
+        }
+
+        /// <summary>
+        /// Set the task as completed due to a given exception.
+        /// </summary>
+        public void SetException(Exception ex)
+        {
+            Complete(ex);
+        }
+
+
+        /// <summary>
+        /// Sets the continuation for the task without any semaphore protection.
+        /// </summary>
+        /// <remarks>
+        /// Only use this with another method that blocks on the semaphore already
+        /// </remarks>
+        /// <param name="action">The action to queue into the thread pool.</param>
+        private void SetContinuationUnprotected(Action action)
         {
             if (_completed)
-            {
-                throw new InvalidOperationException("Cannot complete an already completed task.");
-            }
-
-            _completed = true;
-            _exception = ex;
-
-            if (_continuation is not null)
             {
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
                     if (_executionContext is null)
                     {
-                        _continuation();
+                        action();
                     }
                     else
                     {
-                        ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), _continuation);
+                        ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), action);
                     }
                 });
             }
-        }
-        finally
-        {
-            _synchronize.Release();
-        }
-    }
-
-    public void SetResult()
-    {
-        Complete(null);
-    }
-
-    public void SetException(Exception ex)
-    {
-        Complete(ex);
-    }
-
-
-    private void SetContinuationUnprotected(Action action)
-    {
-        if (_completed)
-        {
-            ThreadPool.QueueUserWorkItem(_ =>
+            else
             {
-                if (_executionContext is null)
-                {
-                    action();
-                }
-                else
-                {
-                    ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), action);
-                }
-            });
-        }
-        else
-        {
-            _continuation = action;
-            _executionContext = ExecutionContext.Capture();
-        }
-    }
-
-
-    public void Wait()
-    {
-        ManualResetEventSlim? reset = null;
-
-        _synchronize.Wait();
-        try
-        {
-            if (!_completed)
-            {
-                reset = new();
-                SetContinuationUnprotected(reset.Set);
+                _continuation = action;
+                _executionContext = ExecutionContext.Capture();
             }
         }
-        finally
+
+        /// <summary>
+        /// Block and wait for the task to complete.
+        /// </summary>
+        public void Wait()
         {
-            _synchronize.Release();
-        }
+            ManualResetEventSlim? reset = null;
 
-        reset?.Wait();
-
-        if (_exception is not null)
-        {
-            ExceptionDispatchInfo.Throw(_exception);
-        }
-    }
-
-
-    public IteratingTask ContinueWith(Action action)
-    {
-        IteratingTask returnTask = new();
-
-        void Callback()
-        {
-            action();
-
-            returnTask.SetResult();
-        }
-
-        _synchronize.Wait();
-        try
-        {
-            SetContinuationUnprotected(Callback);
-        }
-        finally
-        {
-            _synchronize.Release();
-        }
-
-        return returnTask;
-    }
-
-
-    public IteratingTask ContinueWith(Func<IteratingTask> action)
-    {
-        IteratingTask returnTask = new();
-
-        void Callback()
-        {
-            IteratingTask followTask = action();
-            followTask.ContinueWith(() =>
-            {
-                if (followTask._exception is not null)
-                {
-                    returnTask.SetException(followTask._exception);
-                }
-                else
-                {
-                    returnTask.SetResult();
-                }
-            });
-        }
-
-        _synchronize.Wait();
-        try
-        {
-            SetContinuationUnprotected(Callback);
-        }
-        finally
-        {
-            _synchronize.Release();
-        }
-
-        return returnTask;
-    }
-
-
-    public static IteratingTask Run(Action action)
-    {
-        IteratingTask returnTask = new();
-
-        ThreadPool.QueueUserWorkItem(_ =>
-        {
+            _synchronize.Wait();
             try
+            {
+                if (!_completed)
+                {
+                    reset = new();
+                    SetContinuationUnprotected(reset.Set);
+                }
+            }
+            finally
+            {
+                _synchronize.Release();
+            }
+
+            reset?.Wait();
+
+            if (_exception is not null)
+            {
+                ExceptionDispatchInfo.Throw(_exception);
+            }
+        }
+
+
+        /// <summary>
+        /// Add a continuation action to the task that executes once the initial task has completed.
+        /// </summary>
+        /// <param name="action">The action to perform once the initial task has completed.</param>
+        public MyTask ContinueWith(Action action)
+        {
+            MyTask returnTask = new();
+
+            void Callback()
             {
                 action();
-            }
-            catch (Exception ex)
-            {
-                returnTask.SetException(ex);
-                return;
+
+                returnTask.SetResult();
             }
 
-            returnTask.SetResult();
-        });
-
-        return returnTask;
-    }
-
-
-    public static IteratingTask Run(Func<IteratingTask> action)
-    {
-        IteratingTask returnTask = new();
-
-        ThreadPool.QueueUserWorkItem(_ =>
-        {
+            _synchronize.Wait();
             try
             {
-                IteratingTask followTask = action();
+                SetContinuationUnprotected(Callback);
+            }
+            finally
+            {
+                _synchronize.Release();
+            }
+
+            return returnTask;
+        }
+
+
+
+        /// <summary>
+        /// Add a continuation action to the task that executes once the initial task has completed.
+        /// </summary>
+        /// <param name="action">The action to perform once the initial task has completed.</param>
+        /// <returns>A Task that completes once the continuation task has also completed.</returns>
+
+        public MyTask ContinueWith(Func<MyTask> action)
+        {
+            MyTask returnTask = new();
+
+            void Callback()
+            {
+                MyTask followTask = action();
                 followTask.ContinueWith(() =>
                 {
                     if (followTask._exception is not null)
@@ -242,65 +248,150 @@ public class IteratingTask
                     }
                 });
             }
-            catch (Exception ex)
+
+            _synchronize.Wait();
+            try
             {
-                returnTask.SetException(ex);
-                return;
+                SetContinuationUnprotected(Callback);
             }
-        });
-
-        return returnTask;
-    }
-
-
-
-    public static IteratingTask WhenAll(params IEnumerable<IteratingTask> tasks)
-    {
-        IteratingTask returnTask = new();
-
-        List<IteratingTask> useTasks = [.. tasks];
-        if (useTasks.Count < 1)
-        {
-            returnTask.SetResult();
-        }
-        else
-        {
-            int remaining = useTasks.Count;
-
-            void Continuation()
+            finally
             {
-                if (Interlocked.Decrement(ref remaining) < 1)
+                _synchronize.Release();
+            }
+
+            return returnTask;
+        }
+
+
+
+        /// <summary>
+        /// Runs the specified action as a task on the threadpool.
+        /// </summary>
+        /// <param name="action">The action to run on the threadpool.</param>
+        /// <returns>A Task that represents the asynchronous operation.</returns>
+        public static MyTask Run(Action action)
+        {
+            MyTask returnTask = new();
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
                 {
-                    returnTask.SetResult();
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    returnTask.SetException(ex);
+                    return;
+                }
+
+                returnTask.SetResult();
+            });
+
+            return returnTask;
+        }
+
+
+        /// <summary>
+        /// Runs the specified action as a task on the threadpool.
+        /// </summary>
+        /// <param name="action">The action to run on the threadpool.</param>
+        /// <returns>A Task that represents the asynchronous operation.</returns>
+        public static MyTask Run(Func<MyTask> action)
+        {
+            MyTask returnTask = new();
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    MyTask followTask = action();
+                    followTask.ContinueWith(() =>
+                    {
+                        if (followTask._exception is not null)
+                        {
+                            returnTask.SetException(followTask._exception);
+                        }
+                        else
+                        {
+                            returnTask.SetResult();
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    returnTask.SetException(ex);
+                    return;
+                }
+            });
+
+            return returnTask;
+        }
+
+
+
+
+        /// <summary>
+        /// Wait until all of the provided tasks have completed, as an asynchronos operation
+        /// </summary>
+        /// <param name="tasks">The tasks to wait for the ocmpletion of</param>
+        /// <returns>A Task that represents the asynchronous operation.</returns>
+        public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
+        {
+            MyTask returnTask = new();
+
+            List<MyTask> useTasks = [.. tasks];
+            if (useTasks.Count < 1)
+            {
+                returnTask.SetResult();
+            }
+            else
+            {
+                int remaining = useTasks.Count;
+
+                void Continuation()
+                {
+                    if (Interlocked.Decrement(ref remaining) < 1)
+                    {
+                        returnTask.SetResult();
+                    }
+                }
+
+                foreach (MyTask task in useTasks)
+                {
+                    task.ContinueWith(Continuation);
                 }
             }
 
-            foreach (IteratingTask task in useTasks)
-            {
-                task.ContinueWith(Continuation);
-            }
+            return returnTask;
         }
 
-        return returnTask;
+
+        /// <summary>
+        /// Delays for a specified timeout period as an asynchronous operation.
+        /// </summary>
+        /// <param name="timeout">The timeout period to dlay for.</param>
+        /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
+        public static MyTask Delay(int timeout)
+        {
+            MyTask task = new();
+            new Timer(_ => task.SetResult()).Change(timeout, -1);
+            return task;
+        }
     }
 
 
 
-    public static IteratingTask Delay(int timeout)
+    /// <summary>
+    /// Helper method that will iterate over a collection of tasks and run them subsequently, as an asynchronous operation.
+    /// </summary>
+    /// <param name="tasks">The tasks to iterate over.</param>
+    /// <returns>A Task that represents the asynchronous operation</returns>
+    public static MyTask Iterate(IEnumerable<MyTask> tasks)
     {
-        IteratingTask task = new();
-        new Timer(_ => task.SetResult()).Change(timeout, -1);
-        return task;
-    }
+        MyTask returnTask = new();
 
-
-
-
-    public static IteratingTask Iterate(IEnumerable<IteratingTask> tasks)
-    {
-        IteratingTask returnTask = new();
-
-        IEnumerator<IteratingTask> enumerator = tasks.GetEnumerator();
+        IEnumerator<MyTask> enumerator = tasks.GetEnumerator();
 
         void MoveNext()
         {
@@ -308,7 +399,7 @@ public class IteratingTask
             {
                 if (enumerator.MoveNext())
                 {
-                    IteratingTask task = enumerator.Current;
+                    MyTask task = enumerator.Current;
                     task.ContinueWith(MoveNext);
                     return;
                 }
@@ -329,45 +420,51 @@ public class IteratingTask
     }
 
 
-}
-
-
-
-public static class IterateTaskGeneratorSample
-{
-
-    public static IEnumerable<IteratingTask> DoubleLoop(
+    /// <summary>
+    /// Returns an iterator that loops over 2 ranges of integers subsequently.
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="firstStart">The first range start.</param>
+    /// <param name="firstMax">The first range maximum.</param>
+    /// <param name="secondStart">The second range start.</param>
+    /// <param name="secondMax">The second range maximum.</param>
+    /// <returns>An <see cref="IEnumerable{Int32}"/> that loops over 2 integer ranges subsqeuently.</returns>
+    public static IEnumerable<MyTask> DoubleLoop(
+        string identifier,
         int firstStart, int firstMax, int secondStart, int secondMax)
     {
-        Console.WriteLine($"Writing values: {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int value = firstStart; value <= firstMax; ++value)
+        for (int i = firstStart; i <= firstMax; i++)
         {
-            yield return IteratingTask.Delay(1000);
-            Console.WriteLine(value);
+            yield return MyTask.Delay(1000);
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
-        for (int value = secondStart; value <= secondMax; ++value)
+        for (int i = secondStart; i <= secondMax; i++)
         {
-            yield return IteratingTask.Delay(1000);
-            Console.WriteLine(value);
+            yield return MyTask.Delay(1000);
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
 
-        Console.WriteLine("Fin");
+        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
 
-    public static void Run(ParseResult parseResult)
+    /// <summary>
+    /// Runs sample code for the sample.
+    /// </summary>
+    public static void Run()
     {
         int threadCount = 55;
-        AsyncLocal<int> mod = new();
-        List<IteratingTask> tasks = [];
+        List<MyTask> tasks = [];
         for (int i = 0; i < threadCount; ++i)
         {
-            mod.Value = 10 * i;
-            tasks.Add(IteratingTask.Iterate(
-                DoubleLoop(1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value)));
+            int mod = 10 * i;
+            string action = $"Action {i}";
+            tasks.Add(Iterate(
+                DoubleLoop(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod)));
         }
 
-        IteratingTask.WhenAll(tasks).Wait();
+        MyTask.WhenAll(tasks).Wait();
     }
 }

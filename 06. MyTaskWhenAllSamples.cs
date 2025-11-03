@@ -1,33 +1,20 @@
-﻿using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 
+
 /// <summary>
-/// This sample demonstrates using a custom Awaiter to introduce async/await
+/// This sample demonstrates creating a custom implementation of Task.WhenAll with the prevoius custom tasks.
 /// </summary>
-public static class AwaitableCustomSample
+public static class MyTaskWhenAllSamples
 {
+
     /// <summary>
     /// The custom task class to represent work being done in the thead pool
     /// </summary>
     public class MyTask
     {
-        /// <summary>
-        /// Gets a completed task
-        /// </summary>
-        public static MyTask CompletedTask
-        {
-            get
-            {
-                MyTask ret = new();
-                ret.SetResult();
-                return ret;
-            }
-        }
-
-
         /// <summary>
         /// The semaphore used to synchronize between several threads
         /// </summary>
@@ -74,44 +61,6 @@ public static class AwaitableCustomSample
                 }
             }
         }
-
-
-        /// <summary>
-        /// The awaiter used to await on this task type in async/await
-        /// </summary>
-        /// <seealso cref="INotifyCompletion" />
-        public struct Awaiter(MyTask task) : INotifyCompletion
-        {
-            /// <summary>
-            /// Gets a value indicating whether the task is completed.
-            /// </summary>
-            public readonly bool IsCompleted => task.IsCompleted;
-
-            /// <summary>
-            /// Gets the awaiter. Always just this.
-            /// </summary>
-            public readonly Awaiter GetAwaiter() => this;
-
-            /// <summary>
-            /// Gets the result. This task has no return, so just calls Wait();
-            /// </summary>
-            public readonly void GetResult() => task.Wait();
-
-            /// <summary>
-            /// Called when the task is completed.
-            /// </summary>
-            /// <param name="continuation">The continuation to run after completion.</param>
-            public readonly void OnCompleted(Action continuation)
-            {
-                task.ContinueWith(continuation);
-            }
-        }
-
-        /// <summary>
-        /// Gets the awaiter to use with async/await.
-        /// </summary>
-        /// <returns>A new <see cref="Awaiter"/> to use in await</returns>
-        public Awaiter GetAwaiter() => new(this);
 
         /// <summary>
         /// Marks the task as complete, with or without an exception
@@ -233,71 +182,18 @@ public static class AwaitableCustomSample
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
         /// <param name="action">The action to perform once the initial task has completed.</param>
-        public MyTask ContinueWith(Action action)
+        public void ContinueWith(Action action)
         {
-            MyTask returnTask = new();
-
-            void Callback()
-            {
-                action();
-
-                returnTask.SetResult();
-            }
-
             _synchronize.Wait();
             try
             {
-                SetContinuationUnprotected(Callback);
+                SetContinuationUnprotected(action);
             }
             finally
             {
                 _synchronize.Release();
             }
-
-            return returnTask;
         }
-
-
-
-        /// <summary>
-        /// Add a continuation action to the task that executes once the initial task has completed.
-        /// </summary>
-        /// <param name="action">The action to perform once the initial task has completed.</param>
-        /// <returns>A Task that completes once the continuation task has also completed.</returns>
-
-        public MyTask ContinueWith(Func<MyTask> action)
-        {
-            MyTask returnTask = new();
-
-            void Callback()
-            {
-                MyTask followTask = action();
-                followTask.ContinueWith(() =>
-                {
-                    if (followTask._exception is not null)
-                    {
-                        returnTask.SetException(followTask._exception);
-                    }
-                    else
-                    {
-                        returnTask.SetResult();
-                    }
-                });
-            }
-
-            _synchronize.Wait();
-            try
-            {
-                SetContinuationUnprotected(Callback);
-            }
-            finally
-            {
-                _synchronize.Release();
-            }
-
-            return returnTask;
-        }
-
 
 
         /// <summary>
@@ -326,45 +222,6 @@ public static class AwaitableCustomSample
 
             return returnTask;
         }
-
-
-        /// <summary>
-        /// Runs the specified action as a task on the threadpool.
-        /// </summary>
-        /// <param name="action">The action to run on the threadpool.</param>
-        /// <returns>A Task that represents the asynchronous operation.</returns>
-        public static MyTask Run(Func<MyTask> action)
-        {
-            MyTask returnTask = new();
-
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                try
-                {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
-                    {
-                        if (followTask._exception is not null)
-                        {
-                            returnTask.SetException(followTask._exception);
-                        }
-                        else
-                        {
-                            returnTask.SetResult();
-                        }
-                    });
-                }
-                catch (Exception ex)
-                {
-                    returnTask.SetException(ex);
-                    return;
-                }
-            });
-
-            return returnTask;
-        }
-
-
 
 
         /// <summary>
@@ -401,33 +258,19 @@ public static class AwaitableCustomSample
 
             return returnTask;
         }
-
-
-        /// <summary>
-        /// Delays for a specified timeout period as an asynchronous operation.
-        /// </summary>
-        /// <param name="timeout">The timeout period to dlay for.</param>
-        /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
-        public static MyTask Delay(int timeout)
-        {
-            MyTask task = new();
-            new Timer(_ => task.SetResult()).Change(timeout, -1);
-            return task;
-        }
     }
 
 
 
     /// <summary>
-    /// Loops over 2 ranges of integers subsequently as an asynchronous operaiton
+    /// The instance method to run as tasks.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstMax">The first range maximum.</param>
-    /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondMax">The second range maximum.</param>
-    /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task DoubleLoop(
+    /// <param name="firstStart">The first start value.</param>
+    /// <param name="firstMax">The first maximum value, completing the first range.</param>
+    /// <param name="secondStart">The second start value.</param>
+    /// <param name="secondMax">The second maximum value, completing the second range.</param>
+    public static void InstanceMethod(
         string identifier,
         int firstStart, int firstMax, int secondStart, int secondMax)
     {
@@ -435,12 +278,12 @@ public static class AwaitableCustomSample
 
         for (int i = firstStart; i <= firstMax; i++)
         {
-            await MyTask.Delay(1000);
+            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
         for (int i = secondStart; i <= secondMax; i++)
         {
-            await MyTask.Delay(1000);
+            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
 
@@ -451,18 +294,18 @@ public static class AwaitableCustomSample
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
-    public static async Task Run()
+    public static void Run()
     {
         int threadCount = 55;
-        List<Task> tasks = [];
+        List<MyTask> tasks = [];
         for (int i = 0; i < threadCount; ++i)
         {
             int mod = 10 * i;
             string action = $"Action {i}";
-            tasks.Add(
-                DoubleLoop(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod));
+            tasks.Add(MyTask.Run(() =>
+                InstanceMethod(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod)));
         }
 
-        await Task.WhenAll(tasks);
+        MyTask.WhenAll(tasks).Wait();
     }
 }

@@ -1,11 +1,23 @@
-﻿using System.CommandLine;
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 
 namespace AsyncAwaitTutorial;
 
 
+/// <summary>
+/// This sample demonstrates utilizing Channels to bring all prior lessons together coherently
+/// </summary>
 public static class ChannelsSample
 {
+    /// <summary>
+    /// Produces values from 2 ranges subsequently into the given channel as an asynchronous operation.
+    /// </summary>
+    /// <param name="channelWriter">The channel to write values into.</param>
+    /// <param name="firstStart">The first range start.</param>
+    /// <param name="firstEnd">The first range end.</param>
+    /// <param name="secondStart">The second range start.</param>
+    /// <param name="secondEnd">The second range end.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that represents the asynchronous operation.</returns>
     public static async Task Producer(
         ChannelWriter<int> channelWriter,
         int firstStart, int firstEnd, int secondStart, int secondEnd,
@@ -28,6 +40,13 @@ public static class ChannelsSample
     }
 
 
+    /// <summary>
+    /// Consumes a channel, printing out any values that come across, as they come across, as an asynchronous operation.
+    /// </summary>
+    /// <param name="channelReader">The channel reader to consume.</param>
+    /// <param name="identifier">The identifier to note when printing results.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that represents the asynchronous operation.</returns>
     public static async Task Consumer(
         ChannelReader<int> channelReader,
         string identifier,
@@ -45,19 +64,28 @@ public static class ChannelsSample
     }
 
 
+
+    /// <summary>
+    /// Runs sample code for the sample.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public static async Task Run(
-        ParseResult parseResult, CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         Channel<int> channel = Channel.CreateUnbounded<int>();
+
+        int producers = 5;
+        int consumers = 9;
 
         List<Task> producerTasks = [];
         List<Task> consumerTasks = [];
 
-        producerTasks.Add(Producer(channel.Writer, 1, 5, 11, 15, cancellationToken));
-        producerTasks.Add(Producer(channel.Writer, 101, 105, 1001, 1005, cancellationToken));
-        producerTasks.Add(Producer(channel.Writer, 10001, 10005, 100001, 100005, cancellationToken));
-        producerTasks.Add(Producer(channel.Writer, 100001, 100005, 1000001, 1000005, cancellationToken));
-        producerTasks.Add(Producer(channel.Writer, 1000001, 1000005, 10000001, 10000005, cancellationToken));
+        for (int i = 0; i < producers; ++i)
+        {
+            int mod = i == 0 ? 0 : unchecked((int)Math.Pow(10.0, i));
+            producerTasks.Add(Producer(
+                channel.Writer, 1 + mod, 5 + mod, 1000000001 + mod, 1000000005 + mod, cancellationToken));
+        }
 
         Task producerHost = Task.WhenAll(producerTasks)
             .ContinueWith(_ =>
@@ -65,15 +93,11 @@ public static class ChannelsSample
                 channel.Writer.Complete();
             }, cancellationToken);
 
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 1", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 2", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 3", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 4", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 5", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 6", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 7", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 8", cancellationToken));
-        consumerTasks.Add(Consumer(channel.Reader, "Reader 9", cancellationToken));
+        for (int i = 0; i < consumers; ++i)
+        {
+            string name = $"Consumer {i}";
+            consumerTasks.Add(Consumer(channel.Reader, name, cancellationToken));
+        }
 
 
         await Task.WhenAll([producerHost, .. consumerTasks]).ConfigureAwait(false);
