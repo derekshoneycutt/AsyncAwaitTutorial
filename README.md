@@ -1,8 +1,25 @@
 # Async/Await Tutorial Samples
 
 
-The point of this project is to provide a series of 21 samples that progressively build the idea
-of async/await in C#. The progressoin of samples is as follows:
+The point of this project is to provide a series of 21 samples that progressively build to
+and upon the basic idea of async/await in C#. Each example essentially builds on the
+example prior, and so comparing to previous samples is a good way to understand what step
+is being taken, and possibly why.
+
+I would not consider an engineer complete with basic async/await until they have reviewed
+and understood Sample 17, with CancellationToken use. IAsyncEnumerable is also extremely
+valuable in modern C#, and Channels help them, so I would personally recommend counting
+all 21 absolutely essential. That said, many engineers stop at a loose understanding up to
+about sample 15, missing details such as the ExecutionContext and ConfigureAwait along the way.
+They should consider ExecutionContext and CancellationToken, at the very least.
+
+
+Some basic familiarity with C# and Threads is assumed, although this could
+probably be useful for someone with familiarity with other languages understanding how
+async/await code works in C# as well, as well as the idea of Threads is grasped already.
+
+
+The progressoin of samples is as follows:
 
 1. Threads : Opens several threads to demonstrate basic concurrency
 1. Custom Thread Pool : Introduces the basic idea of a thread pool with a couple of reusable threads
@@ -18,7 +35,7 @@ of async/await in C#. The progressoin of samples is as follows:
 1. IEnumerable iterator / yield return : Uses compiler sugar to make iterators easy to write and read
 1. Task iterator : Demonstrates iterating over Tasks returned by yield return to simulate async/await (Uses custom task class because TaskCompletionSource not introduced yet)
 1. Custom await-able : Demonstrates how a task can become available to await -- first real use of async/await
-1. Async/Await : First full, basic demonstration of async/await with standard Tasks only
+1. Async/Await : First full, basic demonstration of async/await with standard Tasks only. Includes ConfigureAwait(false) applied everywhere.
 1. TaskCompletionSource : Demonstrates how to represent synchronous or managed operations alongside asynchronous code via a custom managed Thread and TaskCompletionSource
 1. CancellationToken : Demonstrate the use of cancellation tokens with asynchronous code. This fully brings everything so far into one sample.
 1. Enumerable of Tasks : Gets a basic feel for the logic behind IAsyncEnumerable

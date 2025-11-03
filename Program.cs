@@ -31,7 +31,7 @@ while (doContinue)
     Console.WriteLine("    21. Channels");
     Console.WriteLine();
     Console.WriteLine("Enter \"exit\" to exit. Enter \"help\" for description of each option.");
-    Console.Write("Enter your selection and press Enter: ");
+    Console.Write("Enter your selection as a number (or exit/help) and press Enter: ");
 
     string? entry = Console.ReadLine();
 
@@ -61,7 +61,7 @@ while (doContinue)
         Console.WriteLine("    21. Channels: Brings everything together in a simple demonstration of the Producer/Consumer asynchronous pattern in C# with Channels");
         Console.WriteLine();
         Console.WriteLine("Enter \"exit\" to exit. Enter \"help\" for description of each option.");
-        Console.Write("Enter your selection and press Enter: ");
+        Console.Write("Enter your selection as a number (or exit/help) and press Enter: ");
 
         entry = Console.ReadLine();
     }
