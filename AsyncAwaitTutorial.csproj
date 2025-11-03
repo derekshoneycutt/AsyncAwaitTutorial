@@ -6,11 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
+    <DebugType>embedded</DebugType>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="System.CommandLine" Version="2.0.0-rc.2.25502.107" />
-  </ItemGroup>
 
 </Project>
