@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AsyncAwaitTutorial": {
+      "commandName": "Project",
+      "commandLineArgs": "run --numbered 1"
+    }
+  }
+}
