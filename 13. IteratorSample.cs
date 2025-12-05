@@ -14,7 +14,7 @@ public static class IteratorSample
     /// <param name="firstMax">The first range maximum.</param>
     /// <param name="secondStart">The second range start.</param>
     /// <param name="secondMax">The second range maximum.</param>
-    /// <returns>An <see cref="IEnumerable{Int32}"/> that loops over 2 integer ranges subsqeuently.</returns>
+    /// <returns>An <see cref="IEnumerable{Int32}"/> that loops over 2 integer ranges subsequently.</returns>
     public static IEnumerable<int> DoubleLoop(
         int firstStart, int firstMax, int secondStart, int secondMax)
     {

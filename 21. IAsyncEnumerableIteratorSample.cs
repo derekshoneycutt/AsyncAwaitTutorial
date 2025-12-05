@@ -10,7 +10,7 @@ namespace AsyncAwaitTutorial;
 public static class IAsyncEnumerableGeneratorSample
 {
     /// <summary>
-    /// Asynchonously iterates over 2 ranges subsequently, with a delay between each iteration
+    /// Asynchronously iterates over 2 ranges subsequently, with a delay between each iteration
     /// </summary>
     /// <param name="firstStart">The first range start.</param>
     /// <param name="firstMax">The first range maximum.</param>

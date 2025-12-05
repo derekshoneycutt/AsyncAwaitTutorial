@@ -8,7 +8,7 @@ public static class StdAwaitSample
 {
 
     /// <summary>
-    /// Loops over 2 ranges of integers subsequently as an asynchronous operaiton
+    /// Loops over 2 ranges of integers subsequently as an asynchronous operation
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first range start.</param>

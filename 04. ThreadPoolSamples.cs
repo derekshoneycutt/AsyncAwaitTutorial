@@ -16,7 +16,7 @@ public static class ThreadPoolSamples
     private static readonly ManualResetEventSlim _resetEvent = new(false);
 
     /// <summary>
-    /// The instance method to run as acitons in the thead pool. This is a synchronous method.
+    /// The instance method to run as actions in the thread pool. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>

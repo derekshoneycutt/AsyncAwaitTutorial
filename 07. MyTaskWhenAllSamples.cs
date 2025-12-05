@@ -5,13 +5,13 @@ namespace AsyncAwaitTutorial;
 
 
 /// <summary>
-/// This sample demonstrates creating a custom implementation of Task.Delay with the prevoius custom tasks.
+/// This sample demonstrates creating a custom implementation of Task.WhenAll with the previous custom tasks.
 /// </summary>
-public static class MyTaskDelaySamples
+public static class MyTaskWhenAllSamples
 {
 
     /// <summary>
-    /// The custom task class to represent work being done in the thead pool
+    /// The custom task class to represent work being done in the thread pool
     /// </summary>
     public class MyTask
     {
@@ -44,7 +44,7 @@ public static class MyTaskDelaySamples
         /// Gets a value indicating whether this task has completed operations.
         /// </summary>
         /// <value>
-        /// Is <c>true</c> if this task has completed operatoins; otherwise, <c>false</c>.
+        /// Is <c>true</c> if this task has completed operations; otherwise, <c>false</c>.
         /// </value>
         public bool IsCompleted
         {
@@ -197,9 +197,9 @@ public static class MyTaskDelaySamples
 
 
         /// <summary>
-        /// Runs the specified action as a task on the threadpool.
+        /// Runs the specified action as a task on the thread pool.
         /// </summary>
-        /// <param name="action">The action to run on the threadpool.</param>
+        /// <param name="action">The action to run on the thread pool.</param>
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
@@ -225,9 +225,9 @@ public static class MyTaskDelaySamples
 
 
         /// <summary>
-        /// Wait until all of the provided tasks have completed, as an asynchronos operation
+        /// Wait until all of the provided tasks have completed, as an asynchronous operation
         /// </summary>
-        /// <param name="tasks">The tasks to wait for the ocmpletion of</param>
+        /// <param name="tasks">The tasks to wait for the completion of</param>
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
         {
@@ -258,19 +258,6 @@ public static class MyTaskDelaySamples
 
             return returnTask;
         }
-
-
-        /// <summary>
-        /// Delays for a specified timeout period as an asynchronous operation.
-        /// </summary>
-        /// <param name="timeout">The timeout period to dlay for.</param>
-        /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
-        public static MyTask Delay(int timeout)
-        {
-            MyTask task = new();
-            new Timer(_ => task.SetResult()).Change(timeout, -1);
-            return task;
-        }
     }
 
 
@@ -291,12 +278,12 @@ public static class MyTaskDelaySamples
 
         for (int i = firstStart; i <= firstMax; i++)
         {
-            MyTask.Delay(1000).Wait();
+            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
         for (int i = secondStart; i <= secondMax; i++)
         {
-            MyTask.Delay(1000).Wait();
+            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
 
@@ -322,4 +309,3 @@ public static class MyTaskDelaySamples
         MyTask.WhenAll(tasks).Wait();
     }
 }
-

@@ -33,7 +33,7 @@ public static class MyThreadPoolWithContextSamples
 
 
         /// <summary>
-        /// Static initializer for the threadpool, creates and launches the required threads
+        /// Static initializer for the thread pool, creates and launches the required threads
         /// </summary>
         static MyThreadPool()
         {
@@ -83,7 +83,7 @@ public static class MyThreadPoolWithContextSamples
     private static readonly ManualResetEventSlim _resetEvent = new(false);
 
     /// <summary>
-    /// The instance method to run as acitons in the sample thead pool. This is a synchronous method.
+    /// The instance method to run as actions in the sample thread pool. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>

@@ -3,16 +3,32 @@
 namespace AsyncAwaitTutorial;
 
 
+
 /// <summary>
-/// This sample demonstrates making a custom Task class using the standard ThreadPool class.
+/// This sample demonstrates creating an asynchronous chain of work utilizing the custom tasks previously created
 /// </summary>
-public static class MyTaskSamples
+public static class MyTaskAsyncChainSamples
 {
+
     /// <summary>
-    /// The custom task class to represent work being done in the thead pool
+    /// The custom task class to represent work being done in the thread pool
     /// </summary>
     public class MyTask
     {
+        /// <summary>
+        /// Gets a completed task
+        /// </summary>
+        public static MyTask CompletedTask
+        {
+            get
+            {
+                MyTask ret = new();
+                ret.SetResult();
+                return ret;
+            }
+        }
+
+
         /// <summary>
         /// The semaphore used to synchronize between several threads
         /// </summary>
@@ -42,7 +58,7 @@ public static class MyTaskSamples
         /// Gets a value indicating whether this task has completed operations.
         /// </summary>
         /// <value>
-        /// Is <c>true</c> if this task has completed operatoins; otherwise, <c>false</c>.
+        /// Is <c>true</c> if this task has completed operations; otherwise, <c>false</c>.
         /// </value>
         public bool IsCompleted
         {
@@ -180,24 +196,77 @@ public static class MyTaskSamples
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
         /// <param name="action">The action to perform once the initial task has completed.</param>
-        public void ContinueWith(Action action)
+        public MyTask ContinueWith(Action action)
         {
+            MyTask returnTask = new();
+
+            void Callback()
+            {
+                action();
+
+                returnTask.SetResult();
+            }
+
             _synchronize.Wait();
             try
             {
-                SetContinuationUnprotected(action);
+                SetContinuationUnprotected(Callback);
             }
             finally
             {
                 _synchronize.Release();
             }
+
+            return returnTask;
         }
 
 
+
         /// <summary>
-        /// Runs the specified action as a task on the threadpool.
+        /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
-        /// <param name="action">The action to run on the threadpool.</param>
+        /// <param name="action">The action to perform once the initial task has completed.</param>
+        /// <returns>A Task that completes once the continuation task has also completed.</returns>
+
+        public MyTask ContinueWith(Func<MyTask> action)
+        {
+            MyTask returnTask = new();
+
+            void Callback()
+            {
+                MyTask followTask = action();
+                followTask.ContinueWith(() =>
+                {
+                    if (followTask._exception is not null)
+                    {
+                        returnTask.SetException(followTask._exception);
+                    }
+                    else
+                    {
+                        returnTask.SetResult();
+                    }
+                });
+            }
+
+            _synchronize.Wait();
+            try
+            {
+                SetContinuationUnprotected(Callback);
+            }
+            finally
+            {
+                _synchronize.Release();
+            }
+
+            return returnTask;
+        }
+
+
+
+        /// <summary>
+        /// Runs the specified action as a task on the thread pool.
+        /// </summary>
+        /// <param name="action">The action to run on the thread pool.</param>
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
@@ -220,8 +289,95 @@ public static class MyTaskSamples
 
             return returnTask;
         }
-    }
 
+
+        /// <summary>
+        /// Runs the specified action as a task on the thread pool.
+        /// </summary>
+        /// <param name="action">The action to run on the thread pool.</param>
+        /// <returns>A Task that represents the asynchronous operation.</returns>
+        public static MyTask Run(Func<MyTask> action)
+        {
+            MyTask returnTask = new();
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    MyTask followTask = action();
+                    followTask.ContinueWith(() =>
+                    {
+                        if (followTask._exception is not null)
+                        {
+                            returnTask.SetException(followTask._exception);
+                        }
+                        else
+                        {
+                            returnTask.SetResult();
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    returnTask.SetException(ex);
+                    return;
+                }
+            });
+
+            return returnTask;
+        }
+
+
+
+
+        /// <summary>
+        /// Wait until all of the provided tasks have completed, as an asynchronous operation
+        /// </summary>
+        /// <param name="tasks">The tasks to wait for the completion of</param>
+        /// <returns>A Task that represents the asynchronous operation.</returns>
+        public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
+        {
+            MyTask returnTask = new();
+
+            List<MyTask> useTasks = [.. tasks];
+            if (useTasks.Count < 1)
+            {
+                returnTask.SetResult();
+            }
+            else
+            {
+                int remaining = useTasks.Count;
+
+                void Continuation()
+                {
+                    if (Interlocked.Decrement(ref remaining) < 1)
+                    {
+                        returnTask.SetResult();
+                    }
+                }
+
+                foreach (MyTask task in useTasks)
+                {
+                    task.ContinueWith(Continuation);
+                }
+            }
+
+            return returnTask;
+        }
+
+
+        /// <summary>
+        /// Delays for a specified timeout period as an asynchronous operation.
+        /// </summary>
+        /// <param name="timeout">The timeout period to dlay for.</param>
+        /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
+        public static MyTask Delay(int timeout)
+        {
+            MyTask task = new();
+            new Timer(_ => task.SetResult()).Change(timeout, -1);
+            return task;
+        }
+    }
 
 
 
@@ -233,24 +389,40 @@ public static class MyTaskSamples
     /// <param name="firstMax">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondMax">The second maximum value, completing the second range.</param>
-    public static void InstanceMethod(
+    public static MyTask InstanceMethod(
         string identifier,
         int firstStart, int firstMax, int secondStart, int secondMax)
     {
-        Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
-
-        for (int i = firstStart; i <= firstMax; i++)
+        int i = firstStart;
+        MyTask IncrementAndPrint(int max)
         {
-            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
-        }
-        for (int i = secondStart; i <= secondMax; i++)
-        {
-            Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            ++i;
+
+            if (i <= max)
+            {
+                return MyTask.Delay(1000)
+                    .ContinueWith(() => IncrementAndPrint(max));
+            }
+
+
+            return MyTask.CompletedTask;
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        return MyTask.Run(() =>
+        {
+            Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
+
+            return MyTask.Delay(1000)
+                .ContinueWith(() => IncrementAndPrint(firstMax)
+                    .ContinueWith(() => MyTask.Delay(1000)
+                        .ContinueWith(() =>
+                        {
+                            i = secondStart;
+                            return IncrementAndPrint(secondMax)
+                                .ContinueWith(() => Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}"));
+                        })));
+        });
     }
 
 
@@ -265,13 +437,10 @@ public static class MyTaskSamples
         {
             int mod = 10 * i;
             string action = $"Action {i}";
-            tasks.Add(MyTask.Run(() =>
-                InstanceMethod(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod)));
+            tasks.Add(InstanceMethod(
+                action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod));
         }
 
-        foreach (MyTask task in tasks)
-        {
-            task.Wait();
-        }
+        MyTask.WhenAll(tasks).Wait();
     }
 }
