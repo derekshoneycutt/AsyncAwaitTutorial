@@ -26,10 +26,10 @@ while (doContinue)
     Console.WriteLine("    16. Custom await-able");
     Console.WriteLine("    17. Async/Await");
     Console.WriteLine("    18. TaskCompletionSource");
-    Console.WriteLine("    19. Semaphore");
-    Console.WriteLine("    20. MyCancellationToken");
-    Console.WriteLine("    21. CancellationToken");
-    Console.WriteLine("    22. IAsyncDisposable");
+    Console.WriteLine("    19. MyCancellationToken");
+    Console.WriteLine("    20. CancellationToken");
+    Console.WriteLine("    21. IAsyncDisposable");
+    Console.WriteLine("    22. Semaphore");
     Console.WriteLine("    23. Enumerable of Tasks");
     Console.WriteLine("    24. Custom IAsyncEnumerable implementation");
     Console.WriteLine("    25. IAsyncEnumerable iterator with await and yield return");
@@ -65,10 +65,10 @@ while (doContinue)
         Console.WriteLine("    16. Custom await-able: Demonstrates how a task can become available to await -- first real use of async/await");
         Console.WriteLine("    17. Async/Await: First full, basic demonstration of async/await with standard Tasks only");
         Console.WriteLine("    18. TaskCompletionSource: Demonstrates how to represent synchronous or managed operations alongside asynchronous code via a custom managed Thread and TaskCompletionSource");
-        Console.WriteLine("    19. Semaphore: Demonstrates using semaphores to coordinate asynchronous code.");
-        Console.WriteLine("    20. MyCancellationToken: Demonstrates the structure of cancellation tokens via a custom cancellation token source class.");
-        Console.WriteLine("    21. CancellationToken: Demonstrates the use of cancellation tokens with asynchronous code. This fully brings everything so far into one sample.");
-        Console.WriteLine("    22. IAsyncDisposable: Demonstrates the use of IAsyncDisposable and await using for asynchronous disposal of resources.");
+        Console.WriteLine("    19. MyCancellationToken: Demonstrates the structure of cancellation tokens via a custom cancellation token source class.");
+        Console.WriteLine("    20. CancellationToken: Demonstrates the use of cancellation tokens with asynchronous code. This fully brings everything so far into one sample.");
+        Console.WriteLine("    21. IAsyncDisposable: Demonstrates the use of IAsyncDisposable and await using for asynchronous disposal of resources.");
+        Console.WriteLine("    22. Semaphore: Demonstrates using semaphores to coordinate asynchronous code.");
         Console.WriteLine("    23. Enumerable of Tasks: Gets a basic feel for the logic behind IAsyncEnumerable");
         Console.WriteLine("    24. Custom IAsyncEnumerable implementation: Demonstrates implementing IAsyncEnumerable and IAsyncEnumerator and then using await foreach");
         Console.WriteLine("    25. IAsyncEnumerable iterator with await and yield return: Demonstrates using async/await and yield return together in an IAsyncEnumerator iterator method");
@@ -96,62 +96,59 @@ while (doContinue)
         {
             switch (selection)
             {
-                case 0:
+                case 1:
                     ProceduralSamples.Run();
                     break;
-                case 1:
+                case 2:
                     ThreadSamples.Run();
                     break;
-                case 2:
+                case 3:
                     MyThreadPoolSamples.Run();
                     break;
-                case 3:
+                case 4:
                     MyThreadPoolWithContextSamples.Run();
                     break;
-                case 4:
+                case 5:
                     ThreadPoolSamples.Run();
                     break;
-                case 5:
+                case 6:
                     MyTaskCompletionSamples.Run();
                     break;
-                case 6:
+                case 7:
                     MyTaskSamples.Run();
                     break;
-                case 7:
+                case 8:
                     MyTaskWhenAllSamples.Run();
                     break;
-                case 8:
+                case 9:
                     MyTaskDelaySamples.Run();
                     break;
-                case 9:
+                case 10:
                     MyTaskAsyncChainSamples.Run();
                     break;
-                case 10:
+                case 11:
                     StdTaskAtContinueWithSample.Run();
                     break;
-                case 11:
+                case 12:
                     StateMachineSample.Run();
                     break;
-                case 12:
+                case 13:
                     IEnumerableSample.Run();
                     break;
-                case 13:
+                case 14:
                     IteratorSample.Run();
                     break;
-                case 14:
+                case 15:
                     IterateTaskGeneratorSample.Run();
                     break;
-                case 15:
+                case 16:
                     await AwaitableCustomSample.Run();
                     break;
-                case 16:
+                case 17:
                     await StdAwaitSample.Run();
                     break;
-                case 17:
-                    await TaskCompletionSourceSample.Run();
-                    break;
                 case 18:
-                    await SemaphoreSample.Run(cts.Token);
+                    await TaskCompletionSourceSample.Run();
                     break;
                 case 19:
                     await MyCancellationTokenSample.Run();
@@ -163,27 +160,30 @@ while (doContinue)
                     await IAsyncDisposableSample.Run(cts.Token);
                     break;
                 case 22:
-                    await EnumerableOfTasksSample.Run(cts.Token);
+                    await SemaphoreSample.Run(cts.Token);
                     break;
                 case 23:
-                    await CustomAsyncEnumerableSample.Run(cts.Token);
+                    await EnumerableOfTasksSample.Run(cts.Token);
                     break;
                 case 24:
-                    await IAsyncEnumerableGeneratorSample.Run(cts.Token);
+                    await CustomAsyncEnumerableSample.Run(cts.Token);
                     break;
                 case 25:
-                    await MyChannelSample.Run(cts.Token);
+                    await IAsyncEnumerableGeneratorSample.Run(cts.Token);
                     break;
                 case 26:
-                    await ChannelsSample.Run(cts.Token);
+                    await MyChannelSample.Run(cts.Token);
                     break;
                 case 27:
-                    await StructuredChannelsSample.Run(cts.Token);
+                    await ChannelsSample.Run(cts.Token);
                     break;
                 case 28:
-                    await IObservableSample.Run(cts.Token);
+                    await StructuredChannelsSample.Run(cts.Token);
                     break;
                 case 29:
+                    await IObservableSample.Run(cts.Token);
+                    break;
+                case 30:
                     await IAsyncObservableSample.Run(cts.Token);
                     break;
 

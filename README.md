@@ -56,10 +56,10 @@ Semaphores were used in a previous example and are good, but otherwise, we have 
 
 
 18. TaskCompletionSource : Demonstrates how to represent synchronous or managed operations alongside asynchronous code via a custom managed Thread and TaskCompletionSource
-1. Semaphores : Demonstrates coordinating async methods with SemaphoreSlim. We avoid mutex, monitor, critical sections, and other blocking constructs in async/await code in C#.
 1. Custom CancellationToken : Demonstrates the structure of cancellation tokens with custom types to handle cancellation as a first pass.
 1. CancellationToken : Demonstrate the use of standard cancellation tokens with asynchronous code. This fully brings everything so far into one sample.
 1. IAsyncDisposable : Demonstrates the use of IAsyncDisposable and await using for asynchronous disposal.
+1. Semaphores : Demonstrates coordinating async methods with SemaphoreSlim. We avoid mutex, monitor, critical sections, and other blocking constructs in async/await code in C#.
 
 #### IAsyncEnumerable
 
