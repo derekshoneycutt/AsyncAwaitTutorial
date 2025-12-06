@@ -30,12 +30,12 @@ public static class MyTaskAsyncChainSamples
 
 
         /// <summary>
-        /// The semaphore used to synchronize between several threads
+        /// The lock object used to synchronize between several threads
         /// </summary>
-        private readonly SemaphoreSlim _synchronize = new(1);
+        private readonly Lock _synchronize = new();
 
         /// <summary>
-        /// Flag indicating whether this task has completed yet
+        /// Flag indicating if the task has been completed or not.
         /// </summary>
         private bool _completed = false;
 
@@ -64,15 +64,29 @@ public static class MyTaskAsyncChainSamples
         {
             get
             {
-                _synchronize.Wait();
-                try
+                lock (_synchronize)
                 {
                     return _completed;
                 }
-                finally
-                {
-                    _synchronize.Release();
-                }
+            }
+        }
+
+        /// <summary>
+        /// Executes the specified action on the specified context, if the context is given.
+        /// </summary>
+        /// <param name="action">The action to execute.</param>
+        /// <param name="executionContext">The execution context to execute on.</param>
+        private static void Execute(
+            Action action,
+            ExecutionContext? executionContext = null)
+        {
+            if (executionContext is null)
+            {
+                action();
+            }
+            else
+            {
+                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
             }
         }
 
@@ -83,10 +97,9 @@ public static class MyTaskAsyncChainSamples
         /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
         private void Complete(Exception? ex)
         {
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
-                if (_completed)
+                if (IsCompleted)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
@@ -96,22 +109,8 @@ public static class MyTaskAsyncChainSamples
 
                 if (_continuation is not null)
                 {
-                    ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        if (_executionContext is null)
-                        {
-                            _continuation();
-                        }
-                        else
-                        {
-                            ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), _continuation);
-                        }
-                    });
+                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
                 }
-            }
-            finally
-            {
-                _synchronize.Release();
             }
         }
 
@@ -141,19 +140,9 @@ public static class MyTaskAsyncChainSamples
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
-            if (_completed)
+            if (IsCompleted)
             {
-                ThreadPool.QueueUserWorkItem(_ =>
-                {
-                    if (_executionContext is null)
-                    {
-                        action();
-                    }
-                    else
-                    {
-                        ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), action);
-                    }
-                });
+                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
             }
             else
             {
@@ -169,18 +158,13 @@ public static class MyTaskAsyncChainSamples
         {
             ManualResetEventSlim? reset = null;
 
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
-                if (!_completed)
+                if (!IsCompleted)
                 {
                     reset = new();
                     SetContinuationUnprotected(reset.Set);
                 }
-            }
-            finally
-            {
-                _synchronize.Release();
             }
 
             reset?.Wait();
@@ -200,21 +184,14 @@ public static class MyTaskAsyncChainSamples
         {
             MyTask returnTask = new();
 
-            void Callback()
+            lock (_synchronize)
             {
-                action();
+                SetContinuationUnprotected(() =>
+                {
+                    action();
 
-                returnTask.SetResult();
-            }
-
-            _synchronize.Wait();
-            try
-            {
-                SetContinuationUnprotected(Callback);
-            }
-            finally
-            {
-                _synchronize.Release();
+                    returnTask.SetResult();
+                });
             }
 
             return returnTask;
@@ -232,30 +209,23 @@ public static class MyTaskAsyncChainSamples
         {
             MyTask returnTask = new();
 
-            void Callback()
+            lock (_synchronize)
             {
-                MyTask followTask = action();
-                followTask.ContinueWith(() =>
+                SetContinuationUnprotected(() =>
                 {
-                    if (followTask._exception is not null)
+                    MyTask followTask = action();
+                    followTask.ContinueWith(() =>
                     {
-                        returnTask.SetException(followTask._exception);
-                    }
-                    else
-                    {
-                        returnTask.SetResult();
-                    }
+                        if (followTask._exception is not null)
+                        {
+                            returnTask.SetException(followTask._exception);
+                        }
+                        else
+                        {
+                            returnTask.SetResult();
+                        }
+                    });
                 });
-            }
-
-            _synchronize.Wait();
-            try
-            {
-                SetContinuationUnprotected(Callback);
-            }
-            finally
-            {
-                _synchronize.Release();
             }
 
             return returnTask;
@@ -369,7 +339,7 @@ public static class MyTaskAsyncChainSamples
         /// <summary>
         /// Delays for a specified timeout period as an asynchronous operation.
         /// </summary>
-        /// <param name="timeout">The timeout period to dlay for.</param>
+        /// <param name="timeout">The timeout period to delay for.</param>
         /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
         public static MyTask Delay(int timeout)
         {

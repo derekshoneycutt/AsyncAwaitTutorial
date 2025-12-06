@@ -76,14 +76,17 @@ public static class IObservableSample
     }
 
     /// <summary>
-    /// Simpel disposable class that cancels a cancellation token upon disposal
+    /// Simple disposable class that cancels a cancellation token upon disposal
     /// </summary>
-    public class CancellationTokenDisposable : IDisposable
+    public class CancellationTokenDisposable(
+        CancellationToken cancellationToken = default)
+        : IDisposable
     {
         /// <summary>
         /// The cancellation source that should be cancelled on disposal
         /// </summary>
-        private readonly CancellationTokenSource _cancellationSource = new();
+        private readonly CancellationTokenSource _cancellationSource =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         /// <summary>
         /// Gets the token that is canceled when Dispose is run.
@@ -101,11 +104,38 @@ public static class IObservableSample
         }
     }
 
+
+
+
+
+    /// <summary>
+    /// Converts the IAsyncEnumerable instance to an IObservable instance.
+    /// </summary>
+    /// <typeparam name="T">The type of message in the collection</typeparam>
+    /// <param name="source">The source to convert.</param>
+    /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A new <see cref="IObservable{T}"/> that observes the asynchronous collection.</returns>
+    public static IObservable<T> ToObservable<T>(
+        this IAsyncEnumerable<T> source,
+        bool continueOnCapturedContext = true,
+        CancellationToken cancellationToken = default)
+    {
+        return new Observable<T>(source);
+    }
+
     /// <summary>
     /// Observable class that turns IAsyncEnumerable into the IObservable interface
     /// </summary>
     /// <typeparam name="T">The type of messages in the collection.</typeparam>
-    public class Observable<T>(IAsyncEnumerable<T> source) : IObservable<T>
+    /// <param name="source">The source to convert.</param>
+    /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
+    /// <param name="masterToken">The cancellation token used to signal that a process should not complete. This is extended to all observers that subscribe.</param>
+    public class Observable<T>(
+        IAsyncEnumerable<T> source,
+        bool continueOnCapturedContext = true,
+        CancellationToken masterToken = default)
+        : IObservable<T>
     {
         /// <summary>
         /// Called when a new value is received, as an asynchronous operation.
@@ -113,7 +143,7 @@ public static class IObservableSample
         /// <param name="observer">The observer to notify of new values and errors.</param>
         /// <param name="value">The value to notify.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        private async Task OnNewValueAsync(
+        protected virtual async Task OnNewValueAsync(
             IObserver<T> observer, T value, CancellationToken cancellationToken)
         {
             try
@@ -135,7 +165,7 @@ public static class IObservableSample
         {
             try
             {
-                await foreach (T value in source.WithCancellation(cancellationToken))
+                await foreach (T value in source.WithCancellation(cancellationToken).ConfigureAwait(continueOnCapturedContext))
                 {
                     await OnNewValueAsync(observer, value, cancellationToken);
                 }
@@ -159,23 +189,12 @@ public static class IObservableSample
         /// </returns>
         public IDisposable Subscribe(IObserver<T> observer)
         {
-            CancellationTokenDisposable disposable = new();
+            CancellationTokenDisposable disposable = new(masterToken);
 
             _ = ConsumeForObserver(observer, disposable.Token);
 
             return disposable;
         }
-    }
-
-    /// <summary>
-    /// Converts the IAsyncEnumerable instance to an IObservable instance.
-    /// </summary>
-    /// <typeparam name="T">The type of message in the collection</typeparam>
-    /// <param name="source">The source to convert.</param>
-    /// <returns>A new <see cref="IObservable{T}"/> that observes the asynchronous collection.</returns>
-    public static IObservable<T> ToObservable<T>(this IAsyncEnumerable<T> source)
-    {
-        return new Observable<T>(source);
     }
 
 
@@ -240,7 +259,7 @@ public static class IObservableSample
         Producer producer = new(producers);
         Task producerHost = producer.Run(cancellationToken);
 
-        IObservable<int> observable = producer.ReadAllValuesAsync(cancellationToken).ToObservable();
+        IObservable<int> observable = producer.ReadAllValuesAsync(cancellationToken).ToObservable(false, cancellationToken);
 
         for (int i = 0; i < consumers; ++i)
         {

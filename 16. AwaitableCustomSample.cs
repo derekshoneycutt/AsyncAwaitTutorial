@@ -1,16 +1,14 @@
-﻿using System.Runtime.ExceptionServices;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 
-
-
 /// <summary>
-/// This sample demonstrates using IEnumerable iterator to simulate async/await style
+/// This sample demonstrates using a custom Awaiter to introduce async/await
 /// </summary>
-public static class IterateTaskGeneratorSample
+public static class AwaitableCustomSample
 {
-
     /// <summary>
     /// The custom task class to represent work being done in the thread pool
     /// </summary>
@@ -31,12 +29,12 @@ public static class IterateTaskGeneratorSample
 
 
         /// <summary>
-        /// The semaphore used to synchronize between several threads
+        /// The lock object used to synchronize between several threads
         /// </summary>
-        private readonly SemaphoreSlim _synchronize = new(1);
+        private readonly Lock _synchronize = new();
 
         /// <summary>
-        /// Flag indicating whether this task has completed yet
+        /// Flag indicating if the task has been completed or not.
         /// </summary>
         private bool _completed = false;
 
@@ -65,15 +63,67 @@ public static class IterateTaskGeneratorSample
         {
             get
             {
-                _synchronize.Wait();
-                try
+                lock (_synchronize)
                 {
                     return _completed;
                 }
-                finally
-                {
-                    _synchronize.Release();
-                }
+            }
+        }
+
+
+        /// <summary>
+        /// The awaiter used to await on this task type in async/await
+        /// </summary>
+        /// <seealso cref="INotifyCompletion" />
+        public struct Awaiter(MyTask task) : INotifyCompletion
+        {
+            /// <summary>
+            /// Gets a value indicating whether the task is completed.
+            /// </summary>
+            public readonly bool IsCompleted => task.IsCompleted;
+
+            /// <summary>
+            /// Gets the awaiter. Always just this.
+            /// </summary>
+            public readonly Awaiter GetAwaiter() => this;
+
+            /// <summary>
+            /// Gets the result. This task has no return, so just calls Wait();
+            /// </summary>
+            public readonly void GetResult() => task.Wait();
+
+            /// <summary>
+            /// Called when the task is completed.
+            /// </summary>
+            /// <param name="continuation">The continuation to run after completion.</param>
+            public readonly void OnCompleted(Action continuation)
+            {
+                task.ContinueWith(continuation);
+            }
+        }
+
+        /// <summary>
+        /// Gets the awaiter to use with async/await.
+        /// </summary>
+        /// <returns>A new <see cref="Awaiter"/> to use in await</returns>
+        public Awaiter GetAwaiter() => new(this);
+
+        /// <summary>
+        /// Executes the specified action on the specified context, if the context is given.
+        /// </summary>
+        /// <param name="action">The action to execute.</param>
+        /// <param name="executionContext">The execution context to execute on.</param>
+        private static void Execute(
+            Action action,
+            ExecutionContext? executionContext = null)
+        {
+            if (executionContext is null)
+            {
+                action();
+            }
+            else
+            {
+                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
             }
         }
 
@@ -84,10 +134,9 @@ public static class IterateTaskGeneratorSample
         /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
         private void Complete(Exception? ex)
         {
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
-                if (_completed)
+                if (IsCompleted)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
@@ -97,22 +146,8 @@ public static class IterateTaskGeneratorSample
 
                 if (_continuation is not null)
                 {
-                    ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        if (_executionContext is null)
-                        {
-                            _continuation();
-                        }
-                        else
-                        {
-                            ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), _continuation);
-                        }
-                    });
+                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
                 }
-            }
-            finally
-            {
-                _synchronize.Release();
             }
         }
 
@@ -142,19 +177,9 @@ public static class IterateTaskGeneratorSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
-            if (_completed)
+            if (IsCompleted)
             {
-                ThreadPool.QueueUserWorkItem(_ =>
-                {
-                    if (_executionContext is null)
-                    {
-                        action();
-                    }
-                    else
-                    {
-                        ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), action);
-                    }
-                });
+                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
             }
             else
             {
@@ -170,18 +195,13 @@ public static class IterateTaskGeneratorSample
         {
             ManualResetEventSlim? reset = null;
 
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
-                if (!_completed)
+                if (!IsCompleted)
                 {
                     reset = new();
                     SetContinuationUnprotected(reset.Set);
                 }
-            }
-            finally
-            {
-                _synchronize.Release();
             }
 
             reset?.Wait();
@@ -201,21 +221,14 @@ public static class IterateTaskGeneratorSample
         {
             MyTask returnTask = new();
 
-            void Callback()
+            lock (_synchronize)
             {
-                action();
+                SetContinuationUnprotected(() =>
+                {
+                    action();
 
-                returnTask.SetResult();
-            }
-
-            _synchronize.Wait();
-            try
-            {
-                SetContinuationUnprotected(Callback);
-            }
-            finally
-            {
-                _synchronize.Release();
+                    returnTask.SetResult();
+                });
             }
 
             return returnTask;
@@ -233,30 +246,23 @@ public static class IterateTaskGeneratorSample
         {
             MyTask returnTask = new();
 
-            void Callback()
+            lock (_synchronize)
             {
-                MyTask followTask = action();
-                followTask.ContinueWith(() =>
+                SetContinuationUnprotected(() =>
                 {
-                    if (followTask._exception is not null)
+                    MyTask followTask = action();
+                    followTask.ContinueWith(() =>
                     {
-                        returnTask.SetException(followTask._exception);
-                    }
-                    else
-                    {
-                        returnTask.SetResult();
-                    }
+                        if (followTask._exception is not null)
+                        {
+                            returnTask.SetException(followTask._exception);
+                        }
+                        else
+                        {
+                            returnTask.SetResult();
+                        }
+                    });
                 });
-            }
-
-            _synchronize.Wait();
-            try
-            {
-                SetContinuationUnprotected(Callback);
-            }
-            finally
-            {
-                _synchronize.Release();
             }
 
             return returnTask;
@@ -370,7 +376,7 @@ public static class IterateTaskGeneratorSample
         /// <summary>
         /// Delays for a specified timeout period as an asynchronous operation.
         /// </summary>
-        /// <param name="timeout">The timeout period to dlay for.</param>
+        /// <param name="timeout">The timeout period to delay for.</param>
         /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
         public static MyTask Delay(int timeout)
         {
@@ -383,53 +389,15 @@ public static class IterateTaskGeneratorSample
 
 
     /// <summary>
-    /// Helper method that will iterate over a collection of tasks and run them subsequently, as an asynchronous operation.
-    /// </summary>
-    /// <param name="tasks">The tasks to iterate over.</param>
-    /// <returns>A Task that represents the asynchronous operation</returns>
-    public static MyTask Iterate(IEnumerable<MyTask> tasks)
-    {
-        MyTask returnTask = new();
-
-        IEnumerator<MyTask> enumerator = tasks.GetEnumerator();
-
-        void MoveNext()
-        {
-            try
-            {
-                if (enumerator.MoveNext())
-                {
-                    MyTask task = enumerator.Current;
-                    task.ContinueWith(MoveNext);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                returnTask.SetException(ex);
-                return;
-            }
-
-
-            returnTask.SetResult();
-        }
-
-        MoveNext();
-
-        return returnTask;
-    }
-
-
-    /// <summary>
-    /// Returns an iterator that loops over 2 ranges of integers subsequently.
+    /// Loops over 2 ranges of integers subsequently as an asynchronous operation
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first range start.</param>
     /// <param name="firstMax">The first range maximum.</param>
     /// <param name="secondStart">The second range start.</param>
     /// <param name="secondMax">The second range maximum.</param>
-    /// <returns>An <see cref="IEnumerable{Int32}"/> that loops over 2 integer ranges subsqeuently.</returns>
-    public static IEnumerable<MyTask> DoubleLoop(
+    /// <returns>A Task that represents the asynchronous operation.</returns>
+    public static async Task DoubleLoop(
         string identifier,
         int firstStart, int firstMax, int secondStart, int secondMax)
     {
@@ -437,12 +405,12 @@ public static class IterateTaskGeneratorSample
 
         for (int i = firstStart; i <= firstMax; i++)
         {
-            yield return MyTask.Delay(1000);
+            await MyTask.Delay(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
         for (int i = secondStart; i <= secondMax; i++)
         {
-            yield return MyTask.Delay(1000);
+            await MyTask.Delay(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
 
@@ -453,18 +421,18 @@ public static class IterateTaskGeneratorSample
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
-    public static void Run()
+    public static async Task Run()
     {
         int threadCount = 55;
-        List<MyTask> tasks = [];
+        List<Task> tasks = [];
         for (int i = 0; i < threadCount; ++i)
         {
             int mod = 10 * i;
             string action = $"Action {i}";
-            tasks.Add(Iterate(
-                DoubleLoop(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod)));
+            tasks.Add(
+                DoubleLoop(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod));
         }
 
-        MyTask.WhenAll(tasks).Wait();
+        await Task.WhenAll(tasks);
     }
 }

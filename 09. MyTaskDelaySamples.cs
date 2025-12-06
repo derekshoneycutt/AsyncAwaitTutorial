@@ -5,9 +5,9 @@ namespace AsyncAwaitTutorial;
 
 
 /// <summary>
-/// This sample demonstrates creating a custom implementation of Task.WhenAll with the previous custom tasks.
+/// This sample demonstrates creating a custom implementation of Task.Delay with the previous custom tasks.
 /// </summary>
-public static class MyTaskWhenAllSamples
+public static class MyTaskDelaySamples
 {
 
     /// <summary>
@@ -16,12 +16,12 @@ public static class MyTaskWhenAllSamples
     public class MyTask
     {
         /// <summary>
-        /// The semaphore used to synchronize between several threads
+        /// The lock object used to synchronize between several threads
         /// </summary>
-        private readonly SemaphoreSlim _synchronize = new(1);
+        private readonly Lock _synchronize = new();
 
         /// <summary>
-        /// Flag indicating whether this task has completed yet
+        /// Flag indicating if the task has been completed or not.
         /// </summary>
         private bool _completed = false;
 
@@ -50,15 +50,29 @@ public static class MyTaskWhenAllSamples
         {
             get
             {
-                _synchronize.Wait();
-                try
+                lock (_synchronize)
                 {
                     return _completed;
                 }
-                finally
-                {
-                    _synchronize.Release();
-                }
+            }
+        }
+
+        /// <summary>
+        /// Executes the specified action on the specified context, if the context is given.
+        /// </summary>
+        /// <param name="action">The action to execute.</param>
+        /// <param name="executionContext">The execution context to execute on.</param>
+        private static void Execute(
+            Action action,
+            ExecutionContext? executionContext = null)
+        {
+            if (executionContext is null)
+            {
+                action();
+            }
+            else
+            {
+                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
             }
         }
 
@@ -69,10 +83,9 @@ public static class MyTaskWhenAllSamples
         /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
         private void Complete(Exception? ex)
         {
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
-                if (_completed)
+                if (IsCompleted)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
@@ -82,22 +95,8 @@ public static class MyTaskWhenAllSamples
 
                 if (_continuation is not null)
                 {
-                    ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        if (_executionContext is null)
-                        {
-                            _continuation();
-                        }
-                        else
-                        {
-                            ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), _continuation);
-                        }
-                    });
+                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
                 }
-            }
-            finally
-            {
-                _synchronize.Release();
             }
         }
 
@@ -127,19 +126,9 @@ public static class MyTaskWhenAllSamples
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
-            if (_completed)
+            if (IsCompleted)
             {
-                ThreadPool.QueueUserWorkItem(_ =>
-                {
-                    if (_executionContext is null)
-                    {
-                        action();
-                    }
-                    else
-                    {
-                        ExecutionContext.Run(_executionContext, act => ((Action)act!).Invoke(), action);
-                    }
-                });
+                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
             }
             else
             {
@@ -155,18 +144,13 @@ public static class MyTaskWhenAllSamples
         {
             ManualResetEventSlim? reset = null;
 
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
-                if (!_completed)
+                if (!IsCompleted)
                 {
                     reset = new();
                     SetContinuationUnprotected(reset.Set);
                 }
-            }
-            finally
-            {
-                _synchronize.Release();
             }
 
             reset?.Wait();
@@ -184,14 +168,9 @@ public static class MyTaskWhenAllSamples
         /// <param name="action">The action to perform once the initial task has completed.</param>
         public void ContinueWith(Action action)
         {
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
                 SetContinuationUnprotected(action);
-            }
-            finally
-            {
-                _synchronize.Release();
             }
         }
 
@@ -258,6 +237,19 @@ public static class MyTaskWhenAllSamples
 
             return returnTask;
         }
+
+
+        /// <summary>
+        /// Delays for a specified timeout period as an asynchronous operation.
+        /// </summary>
+        /// <param name="timeout">The timeout period to delay for.</param>
+        /// <returns>A Task that represents the asynchronous operation, completing at the end of hte given timeout.</returns>
+        public static MyTask Delay(int timeout)
+        {
+            MyTask task = new();
+            new Timer(_ => task.SetResult()).Change(timeout, -1);
+            return task;
+        }
     }
 
 
@@ -278,12 +270,12 @@ public static class MyTaskWhenAllSamples
 
         for (int i = firstStart; i <= firstMax; i++)
         {
-            Thread.Sleep(1000);
+            MyTask.Delay(1000).Wait();
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
         for (int i = secondStart; i <= secondMax; i++)
         {
-            Thread.Sleep(1000);
+            MyTask.Delay(1000).Wait();
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
 
@@ -309,3 +301,4 @@ public static class MyTaskWhenAllSamples
         MyTask.WhenAll(tasks).Wait();
     }
 }
+

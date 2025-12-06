@@ -14,9 +14,14 @@ public static class MyTaskCompletionSamples
     public class MyTaskCompletion
     {
         /// <summary>
-        /// The semaphore used to synchronize between several threads
+        /// The lock object used to synchronize between several threads
         /// </summary>
-        private readonly SemaphoreSlim _synchronize = new(1);
+        private readonly Lock _synchronize = new();
+
+        /// <summary>
+        /// Flag indicating if the task has been completed or not.
+        /// </summary>
+        private bool _completed = false;
 
         /// <summary>
         /// The exception that has occurred during the work, or <c>null</c> if no exception has occurred
@@ -35,31 +40,34 @@ public static class MyTaskCompletionSamples
         /// <value>
         /// Is <c>true</c> if this task has completed operations; otherwise, <c>false</c>.
         /// </value>
-        public bool IsCompleted { get; private set;  }
+        public bool IsCompleted
+        {
+            get
+            {
+                lock (_synchronize)
+                {
+                    return _completed;
+                }
+            }
+        }
 
         /// <summary>
         /// Marks the task as complete, with or without an exception
         /// </summary>
         /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
-        /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
         private void Complete(Exception? ex)
         {
-            _synchronize.Wait();
-            try
+            lock (_synchronize)
             {
                 if (IsCompleted)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
 
-                IsCompleted = true;
+                _completed = true;
                 _exception = ex;
 
                 _waitEvent.Set();
-            }
-            finally
-            {
-                _synchronize.Release();
             }
         }
 

@@ -31,6 +31,24 @@ public static class MyThreadPoolWithContextSamples
         /// </summary>
         public static readonly BlockingCollection<(Action, ExecutionContext?)> _actionQueue = [];
 
+        /// <summary>
+        /// Executes the specified action on the specified context, if the context is given.
+        /// </summary>
+        /// <param name="action">The action to execute.</param>
+        /// <param name="executionContext">The execution context to execute on.</param>
+        private static void Execute(
+            Action action,
+            ExecutionContext? executionContext = null)
+        {
+            if (executionContext is null)
+            {
+                action();
+            }
+            else
+            {
+                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
+            }
+        }
 
         /// <summary>
         /// Static initializer for the thread pool, creates and launches the required threads
@@ -41,19 +59,10 @@ public static class MyThreadPoolWithContextSamples
             {
                 new Thread(() =>
                 {
-                    int iterCount = 0;
                     while (true)
                     {
-                        Console.WriteLine($"Thread iter {++iterCount}");
                         (Action nextAction, ExecutionContext? context) = _actionQueue.Take();
-                        if (context is null)
-                        {
-                            nextAction();
-                        }
-                        else
-                        {
-                            ExecutionContext.Run(context, act => ((Action)act!).Invoke(), nextAction);
-                        }
+                        Execute(nextAction, context);
                     }
                 })
                 { IsBackground = true }.Start();

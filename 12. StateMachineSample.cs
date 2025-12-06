@@ -80,7 +80,7 @@ public static class StateMachineSample
                 state.Position = StatePosition.FirstLoop;
                 state.CurrentValue = state.FirstStart;
                 state.CanContinue = true;
-                return 1;
+                return state.CurrentValue;
 
             case StatePosition.FirstLoop:
                 Thread.Sleep(1000);

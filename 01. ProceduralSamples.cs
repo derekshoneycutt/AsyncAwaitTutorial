@@ -1,17 +1,12 @@
 ﻿namespace AsyncAwaitTutorial;
 
-
 /// <summary>
-/// This sample demonstrates launching threads within C#. That's all
-/// <para>
-/// This launches 4 threads, each of which is the InstanceMethod with different values.
-/// The theads run through 2 loops, printing each number in the specified ranges.
-/// </para>
+/// Samples setting the basic zero-basis, not even using threads or anything really.
 /// </summary>
-public static class ThreadSamples
+public class ProceduralSamples
 {
     /// <summary>
-    /// The instance method to run as independent threads in the sample. This is a synchronous method.
+    /// The instance method to run as independent examples in the sample. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
@@ -43,22 +38,13 @@ public static class ThreadSamples
     /// </summary>
     public static void Run()
     {
-        Thread instanceCaller = new(new ThreadStart(() => InstanceMethod("Thread 1", 1, 5, 101, 105)));
-        instanceCaller.Start();
-
-        Thread instanceCaller2 = new(new ThreadStart(() => InstanceMethod("Thread 2", 11, 15, 111, 115)));
-        instanceCaller2.Start();
-
-        Thread instanceCaller3 = new(new ThreadStart(() => InstanceMethod("Thread 3", 21, 25, 121, 125)));
-        instanceCaller3.Start();
-
-        Thread instanceCaller4 = new(new ThreadStart(() => InstanceMethod("Thread 4", 31, 35, 131, 135)));
-        instanceCaller4.Start();
-
-        instanceCaller.Join();
-        instanceCaller2.Join();
-        instanceCaller3.Join();
-        instanceCaller4.Join();
+        int actionCount = 5;
+        for (int i = 0; i < actionCount; ++i)
+        {
+            int mod = 10 * i;
+            string action = $"Action {i}";
+            InstanceMethod(action, 1 + mod, 5 + mod, 1001 + mod, 1005 + mod);
+        }
 
         Console.WriteLine("All fin");
     }
