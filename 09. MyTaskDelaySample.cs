@@ -7,7 +7,7 @@ namespace AsyncAwaitTutorial;
 /// <summary>
 /// This sample demonstrates creating a custom implementation of Task.Delay with the previous custom tasks.
 /// </summary>
-public static class MyTaskDelaySamples
+public class MyTaskDelaySample : ITutorialSample
 {
 
     /// <summary>
@@ -85,7 +85,7 @@ public static class MyTaskDelaySamples
         {
             lock (_synchronize)
             {
-                if (IsCompleted)
+                if (_completed)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
@@ -126,7 +126,7 @@ public static class MyTaskDelaySamples
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
-            if (IsCompleted)
+            if (_completed)
             {
                 ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
             }
@@ -146,7 +146,7 @@ public static class MyTaskDelaySamples
 
             lock (_synchronize)
             {
-                if (!IsCompleted)
+                if (!_completed)
                 {
                     reset = new();
                     SetContinuationUnprotected(reset.Set);
@@ -259,21 +259,22 @@ public static class MyTaskDelaySamples
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
-    /// <param name="firstMax">The first maximum value, completing the first range.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
-    /// <param name="secondMax">The second maximum value, completing the second range.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
     public static void InstanceMethod(
         string identifier,
-        int firstStart, int firstMax, int secondStart, int secondMax)
+        int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstMax; i++)
+        // Update the loops to call the custom Delay instead of Thread.Sleep
+        for (int i = firstStart; i <= firstEnd; i++)
         {
             MyTask.Delay(1000).Wait();
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
-        for (int i = secondStart; i <= secondMax; i++)
+        for (int i = secondStart; i <= secondEnd; i++)
         {
             MyTask.Delay(1000).Wait();
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
@@ -286,19 +287,23 @@ public static class MyTaskDelaySamples
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
-    public static void Run()
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public async Task Run(CancellationToken cancellationToken)
     {
-        int threadCount = 55;
+        int actionCount = 55;
         List<MyTask> tasks = [];
-        for (int i = 0; i < threadCount; ++i)
+        AsyncLocal<int> mod = new();
+        for (int i = 0; i < actionCount; ++i)
         {
-            int mod = 10 * i;
+            mod.Value = 10 * i;
             string action = $"Action {i}";
             tasks.Add(MyTask.Run(() =>
-                InstanceMethod(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod)));
+                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value)));
         }
 
         MyTask.WhenAll(tasks).Wait();
+
+        Console.WriteLine("All fin");
     }
 }
 

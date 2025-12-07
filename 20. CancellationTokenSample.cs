@@ -4,36 +4,40 @@
 /// <summary>
 /// This sample demonstrates how to utilize CancellationToken to control asynchronous methods.
 /// </summary>
-public static class CancellationTokenSample
+/// <remarks>
+/// This is basically as simple as removing our custom cancellation token classes and using the standard one instead.
+/// This also enables us to pass it down to some methods that already accept it!
+/// </remarks>
+public class CancellationTokenSample : ITutorialSample
 {
     /// <summary>
     /// The instance method to run as independent threads in the sample. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
-    /// <param name="firstMax">The first maximum value, completing the first range.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
-    /// <param name="secondMax">The second maximum value, completing the second range.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
     /// <param name="completionSource">The Task Completion Source to mark when this task has completed</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public static void InstanceMethod(
+    public static void ThreadMethod(
         string identifier,
-        int firstStart, int firstMax, int secondStart, int secondMax,
+        int firstStart, int firstEnd, int secondStart, int secondEnd,
         TaskCompletionSource completionSource,
         CancellationToken cancellationToken)
     {
+        // Replace the parameter with the standard cancellation token type
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstMax; i++)
+            for (int i = firstStart; i <= firstEnd; i++)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
             }
-            for (int i = secondStart; i <= secondMax; i++)
+            for (int i = secondStart; i <= secondEnd; i++)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -47,6 +51,7 @@ public static class CancellationTokenSample
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // With the standard cancellation token, we can send the canceled token into our task completion source for more information to the caller
             completionSource.SetCanceled(cancellationToken);
         }
         catch (Exception ex)
@@ -61,24 +66,26 @@ public static class CancellationTokenSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstMax">The first range maximum.</param>
+    /// <param name="firstEnd">The first range maximum.</param>
     /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondMax">The second range maximum.</param>
+    /// <param name="secondEnd">The second range maximum.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task DoubleLoop(
+    public static async Task InstanceMethod(
         string identifier,
-        int firstStart, int firstMax, int secondStart, int secondMax,
+        int firstStart, int firstEnd, int secondStart, int secondEnd,
         CancellationToken cancellationToken)
     {
+        // Change to the standard cancellation token.
+        // Send the cancellation token to the delays and remove any other polls on the token in this method--they're now superfluous
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstMax; i++)
+        for (int i = firstStart; i <= firstEnd; i++)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
-        for (int i = secondStart; i <= secondMax; i++)
+        for (int i = secondStart; i <= secondEnd; i++)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
@@ -92,9 +99,12 @@ public static class CancellationTokenSample
     /// Runs sample code for the sample.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public static async Task Run(
+    public async Task Run(
         CancellationToken cancellationToken)
     {
+        // We update to the standard cancellation token
+        //  Note: We could use the constructor taking in a time limit instead of the manual delay below as well
+        //   The function is largely the same, in that the token will cancel after a given timeout if specified.
         CancellationTokenSource cts = new();//new(4500);
 
         CancellationTokenSource linked =
@@ -105,30 +115,37 @@ public static class CancellationTokenSample
             Console.WriteLine("Registered cancellation.");
         });
 
-        int threadCount = 55;
+        int actionCount = 55;
         List<Task> tasks = [];
-        for (int i = 0; i < threadCount; ++i)
+        AsyncLocal<int> mod = new();
+        for (int i = 0; i < actionCount; ++i)
         {
-            int mod = 10 * i;
+            mod.Value = 10 * i;
             string action = $"Action {i}";
+            // Add the cancellation token to the parameters
             tasks.Add(
-                DoubleLoop(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod, linked.Token));
+                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value, cts.Token));
         }
 
-        await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
-
+        //We can pass the cancellation token down now that we know what to do!
+        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            InstanceMethod("Single Thread", 1, 5, 101, 105, backThreadSource, linked.Token)));
+            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, linked.Token)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 
         try
         {
             await Task.Delay(3000, cancellationToken).ConfigureAwait(false);
+            // the standard cancel has an async cancel method
+            // note: this one can cause problems with the UI thread in WPF, etc., so can't
+            //   always be used, but it is nice when we can!
             await cts.CancelAsync().ConfigureAwait(false);
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            Console.WriteLine("All fin");
         }
         catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
         {

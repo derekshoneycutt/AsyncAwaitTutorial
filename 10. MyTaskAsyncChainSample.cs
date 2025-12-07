@@ -4,17 +4,10 @@ namespace AsyncAwaitTutorial;
 
 
 
-
 /// <summary>
-/// This sample demonstrates using IEnumerable iterator to simulate async/await style
+/// This sample demonstrates creating an asynchronous chain of work utilizing the custom tasks previously created
 /// </summary>
-/// <remarks>
-/// For this sample, we go back to step 9--Using Custom Task.Delay--and try out what happens
-/// if we pretend yield return is kind of like await in async/await. In reality, the code compiled between these two is remarkably similar.
-/// We have to add and use an Iterate method as well as refactoring it to use the yield return method.
-/// This isn't a great thing for production code, but it demonstrates a transitional phase to understand what is happening.
-/// </remarks>
-public class IterateTaskGeneratorSample : ITutorialSample
+public class MyTaskAsyncChainSample : ITutorialSample
 {
 
     /// <summary>
@@ -22,6 +15,8 @@ public class IterateTaskGeneratorSample : ITutorialSample
     /// </summary>
     public class MyTask
     {
+        // We will use CompletedTask during this sample, so add an implementation of it here.
+
         /// <summary>
         /// Gets a completed task
         /// </summary>
@@ -187,8 +182,10 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
         /// <param name="action">The action to perform once the initial task has completed.</param>
+        /// <returns>A Task that completes when the continuation action has completed.</returns>
         public MyTask ContinueWith(Action action)
         {
+            // Update to return a Task that completes once the continuation has completed
             MyTask returnTask = new();
 
             lock (_synchronize)
@@ -214,6 +211,7 @@ public class IterateTaskGeneratorSample : ITutorialSample
 
         public MyTask ContinueWith(Func<MyTask> action)
         {
+            // Add a version that handles an asynchronous continuation method that should be tracked
             MyTask returnTask = new();
 
             lock (_synchronize)
@@ -275,6 +273,7 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Func<MyTask> action)
         {
+            // Add a version that handles an asynchronous method that should be tracked
             MyTask returnTask = new();
 
             ThreadPool.QueueUserWorkItem(_ =>
@@ -359,71 +358,49 @@ public class IterateTaskGeneratorSample : ITutorialSample
 
 
     /// <summary>
-    /// Helper method that will iterate over a collection of tasks and run them subsequently, as an asynchronous operation.
-    /// </summary>
-    /// <param name="tasks">The tasks to iterate over.</param>
-    /// <returns>A Task that represents the asynchronous operation</returns>
-    public static MyTask Iterate(IEnumerable<MyTask> tasks)
-    {
-        MyTask returnTask = new();
-
-        IEnumerator<MyTask> enumerator = tasks.GetEnumerator();
-
-        void MoveNext()
-        {
-            try
-            {
-                if (enumerator.MoveNext())
-                {
-                    MyTask task = enumerator.Current;
-                    task.ContinueWith(MoveNext);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                returnTask.SetException(ex);
-                return;
-            }
-
-
-            returnTask.SetResult();
-        }
-
-        MoveNext();
-
-        return returnTask;
-    }
-
-
-    /// <summary>
-    /// Returns an iterator that loops over 2 ranges of integers subsequently.
+    /// The instance method to run as tasks.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstEnd">The first range maximum.</param>
-    /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondEnd">The second range maximum.</param>
-    /// <returns>An <see cref="IEnumerable{Int32}"/> that loops over 2 integer ranges subsequently.</returns>
-    public static IEnumerable<MyTask> InstanceMethod(
+    /// <param name="firstStart">The first start value.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
+    /// <param name="secondStart">The second start value.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    public static MyTask InstanceMethod(
         string identifier,
         int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
-        Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
+        // Completely refactor to use chains of ContinueWith so that it is fully asynchronous for the first time
 
-        // We return IEnumerable<MyTask> instead of void and do a yield return on the MyTask.Delay instead of Wait.
-        for (int i = firstStart; i <= firstEnd; i++)
+        int i = firstStart;
+        MyTask IncrementAndPrint(int max)
         {
-            yield return MyTask.Delay(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
-        }
-        for (int i = secondStart; i <= secondEnd; i++)
-        {
-            yield return MyTask.Delay(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            ++i;
+
+            if (i <= max)
+            {
+                return MyTask.Delay(1000)
+                    .ContinueWith(() => IncrementAndPrint(max));
+            }
+
+
+            return MyTask.CompletedTask;
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        return MyTask.Run(() =>
+        {
+            Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
+
+            return MyTask.Delay(1000)
+                .ContinueWith(() => IncrementAndPrint(firstEnd)
+                    .ContinueWith(() => MyTask.Delay(1000)
+                        .ContinueWith(() =>
+                        {
+                            i = secondStart;
+                            return IncrementAndPrint(secondEnd)
+                                .ContinueWith(() => Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}"));
+                        })));
+        });
     }
 
 
@@ -440,9 +417,9 @@ public class IterateTaskGeneratorSample : ITutorialSample
         {
             mod.Value = 10 * i;
             string action = $"Action {i}";
-            // Now we call Iterate on the IEnumerable InstanceMethod returns; unfortunately back to an intermediary and not directly adding return from InstanceMethod
-            tasks.Add(Iterate(
-                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value)));
+            // We don't need to do Task.Run any more because the method returns a direct Task already
+            tasks.Add(InstanceMethod(
+                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
         }
 
         MyTask.WhenAll(tasks).Wait();

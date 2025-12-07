@@ -4,9 +4,14 @@ namespace AsyncAwaitTutorial;
 
 
 /// <summary>
-/// This sample demonstrates creating a basic task completion class to track tasks on the thread pool
+/// This sample demonstrates creating a basic task completion class to track tasks on the thread pool.
 /// </summary>
-public static class MyTaskCompletionSamples
+/// <remarks>
+/// At this stage, the major goal is to demonstration something akin to the TaskCompletionSource that we will
+/// demonstrate later, when we have full async/await. Nonetheless, the basic pattern is important and
+/// used thoroughly in the future, so the basics are constructed and demonstrated here for that pattern.
+/// </remarks>
+public class MyTaskCompletionSample : ITutorialSample
 {
     /// <summary>
     /// Custom class representing when a task is completed on the thread pool
@@ -59,7 +64,7 @@ public static class MyTaskCompletionSamples
         {
             lock (_synchronize)
             {
-                if (IsCompleted)
+                if (_completed)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
@@ -89,6 +94,7 @@ public static class MyTaskCompletionSamples
 
         /// <summary>
         /// Block and wait for the task to complete.
+        /// Re-throws any exceptions that are reported to complete the task.
         /// </summary>
         public void Wait()
         {
@@ -101,29 +107,35 @@ public static class MyTaskCompletionSamples
         }
     }
 
+
+    // We remove the _actionCount and _resetEvent because now we can track them with our Task objects well enough.
+
+
     /// <summary>
     /// The instance method to run as actions in the thread pool. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
-    /// <param name="firstMax">The first maximum value, completing the first range.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
-    /// <param name="secondMax">The second maximum value, completing the second range.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="taskCompletion">The task completion object to notify completion with.</param>
     public static void InstanceMethod(
         string identifier,
-        int firstStart, int firstMax, int secondStart, int secondMax,
-        MyTaskCompletion taskCompletion)
+        int firstStart, int firstEnd, int secondStart, int secondEnd,
+        MyTaskCompletion taskCompletion) // New parameter to track the task's completion with
     {
+        //Wrap the whole worker method in a try block
         try
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstMax; i++)
+            for (int i = firstStart; i <= firstEnd; i++)
             {
                 Thread.Sleep(1000);
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
             }
-            for (int i = secondStart; i <= secondMax; i++)
+            for (int i = secondStart; i <= secondEnd; i++)
             {
                 Thread.Sleep(1000);
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
@@ -131,10 +143,12 @@ public static class MyTaskCompletionSamples
 
             Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
 
+            // set the task as complete
             taskCompletion.SetResult();
         }
         catch (Exception ex)
         {
+            // set the task as complete, but with an error state
             taskCompletion.SetException(ex);
         }
     }
@@ -143,21 +157,26 @@ public static class MyTaskCompletionSamples
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
-    public static void Run()
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public async Task Run(CancellationToken cancellationToken)
     {
         int actionCount = 55;
-        List<MyTaskCompletion> tasks = new();
+        // Create a list of the tasks to monitor
+        List<MyTaskCompletion> tasks = [];
+        AsyncLocal<int> mod = new();
         for (int i = 0; i < actionCount; ++i)
         {
-            int mod = 10 * i;
+            mod.Value = 10 * i;
             string action = $"Action {i}";
+            // Create a task to send to the instance method to track the completion of the work and add it to the list
             MyTaskCompletion taskCompletion = new();
             ThreadPool.QueueUserWorkItem(_ => InstanceMethod(
-                action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod,
+                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value,
                 taskCompletion));
             tasks.Add(taskCompletion);
         }
 
+        // Wait for tall the tasks instead of the reset event
         foreach (MyTaskCompletion task in tasks)
         {
             task.Wait();

@@ -4,10 +4,85 @@ namespace AsyncAwaitTutorial;
 
 
 /// <summary>
+/// Separate static class to house extension method ToObservable for generating an IObservable from IAsyncEnumerable.
+/// See below top comment for explanation of sample.
+/// </summary>
+public static class IObservableSampleExtensions
+{
+    /// <summary>
+    /// Converts the IAsyncEnumerable instance to an IAsyncObservable instance.
+    /// </summary>
+    /// <typeparam name="T">The type of message in the collection</typeparam>
+    /// <param name="source">The source to convert.</param>
+    /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A new <see cref="IObservable{T}"/> that observes the asynchronous collection.</returns>
+    public static IObservable<T> ToObservable<T>(
+        this IAsyncEnumerable<T> source,
+        bool continueOnCapturedContext = true,
+        CancellationToken cancellationToken = default)
+    {
+        return new IObservableSample.Observable<T>(source, continueOnCapturedContext, cancellationToken);
+    }
+}
+
+
+
+/// <summary>
 /// This sample demonstrates how you can turn an IAsyncEnumerable into an IObservable and utilize that to handle all events.
 /// </summary>
-public static class IObservableSample
+public class IObservableSample : ITutorialSample
 {
+    /// <summary>
+    /// The instance method to run as independent threads in the sample. This is a synchronous method.
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="firstStart">The first start value.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
+    /// <param name="secondStart">The second start value.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="completionSource">The Task Completion Source to mark when this task has completed</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public static void ThreadMethod(
+        string identifier,
+        int firstStart, int firstEnd, int secondStart, int secondEnd,
+        TaskCompletionSource completionSource,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
+
+            for (int i = firstStart; i <= firstEnd; i++)
+            {
+                Thread.Sleep(1000);
+                cancellationToken.ThrowIfCancellationRequested();
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            }
+            for (int i = secondStart; i <= secondEnd; i++)
+            {
+                Thread.Sleep(1000);
+                cancellationToken.ThrowIfCancellationRequested();
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+
+            completionSource.SetResult();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            completionSource.SetCanceled(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            completionSource.SetException(ex);
+        }
+    }
+
+
+
     /// <summary>
     /// Producer class used to generate integer values and 
     /// </summary>
@@ -19,32 +94,59 @@ public static class IObservableSample
         private readonly Channel<int> _channel = Channel.CreateUnbounded<int>();
 
         /// <summary>
-        /// Produces values from 2 ranges subsequently into the given channel as an asynchronous operation.
+        /// Producers the first range of values to the consumer, with a delay between each production
         /// </summary>
-        /// <param name="firstStart">The first range start.</param>
-        /// <param name="firstEnd">The first range end.</param>
-        /// <param name="secondStart">The second range start.</param>
-        /// <param name="secondEnd">The second range end.</param>
+        /// <param name="identifier">The identifier of the producer method to report as.</param>
+        /// <param name="channel">The channel to produce values onto.</param>
+        /// <param name="start">The start of the range of values to produce.</param>
+        /// <param name="end">The end of the range of values to produce.</param>
+        /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        /// <returns>A Task that represents the asynchronous operation.</returns>
-        public async Task Produce(
-            int firstStart, int firstEnd, int secondStart, int secondEnd,
+        public async Task FirstProducer(
+            string identifier,
+            int start, int end,
+            SemaphoreSlim secondLoopSignal,
             CancellationToken cancellationToken)
         {
-            Console.WriteLine($"Producing on {Environment.CurrentManagedThreadId}...");
+            Console.WriteLine($"Producing first values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int value = firstStart; value <= firstEnd; ++value)
+            for (int i = start; i <= end; ++i)
             {
                 await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                await _channel.Writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
-            }
-            for (int value = secondStart; value <= secondEnd; ++value)
-            {
-                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                await _channel.Writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
+                await _channel.Writer.WriteAsync(i, cancellationToken).ConfigureAwait(false);
             }
 
-            Console.WriteLine($"Fin Prod on {Environment.CurrentManagedThreadId}");
+            secondLoopSignal.Release();
+
+            Console.WriteLine($"Fin first production {identifier} / {Environment.CurrentManagedThreadId}");
+        }
+
+        /// <summary>
+        /// Producers the second range of values to the consumer, with a delay between each production
+        /// </summary>
+        /// <param name="identifier">The identifier of the producer method to report as.</param>
+        /// <param name="channel">The channel to produce values onto.</param>
+        /// <param name="start">The start of the range of values to produce.</param>
+        /// <param name="end">The end of the range of values to produce.</param>
+        /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
+        /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+        public async Task SecondProducer(
+            string identifier,
+            int start, int end,
+            SemaphoreSlim secondLoopSignal,
+            CancellationToken cancellationToken)
+        {
+            Console.WriteLine($"Producing second values: {identifier} / {Environment.CurrentManagedThreadId}");
+
+            await secondLoopSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            for (int i = start; i <= end; ++i)
+            {
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+                await _channel.Writer.WriteAsync(i, cancellationToken).ConfigureAwait(false);
+            }
+
+            Console.WriteLine($"Fin second production {identifier} / {Environment.CurrentManagedThreadId}");
         }
 
         /// <summary>
@@ -53,17 +155,36 @@ public static class IObservableSample
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
         public async Task Run(CancellationToken cancellationToken)
         {
-            List<Task> producerTasks = [];
-            for (int i = 0; i < count; ++i)
+            // For the run, we have basically the same code to launch the producers as before, but now isolated and OOP-ish
+            List<Task> productionTasks = [];
+            List<SemaphoreSlim> semaphores = [];
+            AsyncLocal<int> mod = new();
+
+            try
             {
-                int mod = i == 0 ? 0 : unchecked((int)Math.Pow(10.0, i));
-                producerTasks.Add(Produce(
-                    1 + mod, 5 + mod, 1000000001 + mod, 1000000005 + mod, cancellationToken));
+                for (int i = 0; i < count; ++i)
+                {
+                    mod.Value = 10 * i;
+                    string action = $"Action {i}";
+                    SemaphoreSlim secondLoopSignal = new(0);
+                    semaphores.Add(secondLoopSignal);
+                    productionTasks.Add(
+                        FirstProducer(action, 1 + mod.Value, 5 + mod.Value, secondLoopSignal, cancellationToken));
+                    productionTasks.Add(
+                        SecondProducer(action, 10001 + mod.Value, 10005 + mod.Value, secondLoopSignal, cancellationToken));
+                }
+
+                await Task.WhenAll(productionTasks).ConfigureAwait(false);
+
+                _channel.Writer.Complete();
             }
-
-            await Task.WhenAll(producerTasks);
-
-            _channel.Writer.Complete();
+            finally
+            {
+                foreach (SemaphoreSlim semaphore in semaphores)
+                {
+                    semaphore.Dispose();
+                }
+            }
         }
 
         /// <summary>
@@ -79,14 +200,16 @@ public static class IObservableSample
     /// Simple disposable class that cancels a cancellation token upon disposal
     /// </summary>
     public class CancellationTokenDisposable(
-        CancellationToken cancellationToken = default)
+        params CancellationToken[] cancellationTokens)
         : IDisposable
     {
         /// <summary>
         /// The cancellation source that should be cancelled on disposal
         /// </summary>
         private readonly CancellationTokenSource _cancellationSource =
-            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cancellationTokens.Length > 0
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationTokens)
+                : new();
 
         /// <summary>
         /// Gets the token that is canceled when Dispose is run.
@@ -105,25 +228,6 @@ public static class IObservableSample
     }
 
 
-
-
-
-    /// <summary>
-    /// Converts the IAsyncEnumerable instance to an IObservable instance.
-    /// </summary>
-    /// <typeparam name="T">The type of message in the collection</typeparam>
-    /// <param name="source">The source to convert.</param>
-    /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
-    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    /// <returns>A new <see cref="IObservable{T}"/> that observes the asynchronous collection.</returns>
-    public static IObservable<T> ToObservable<T>(
-        this IAsyncEnumerable<T> source,
-        bool continueOnCapturedContext = true,
-        CancellationToken cancellationToken = default)
-    {
-        return new Observable<T>(source);
-    }
-
     /// <summary>
     /// Observable class that turns IAsyncEnumerable into the IObservable interface
     /// </summary>
@@ -134,7 +238,7 @@ public static class IObservableSample
     public class Observable<T>(
         IAsyncEnumerable<T> source,
         bool continueOnCapturedContext = true,
-        CancellationToken masterToken = default)
+        params CancellationToken[] masterTokens)
         : IObservable<T>
     {
         /// <summary>
@@ -153,6 +257,7 @@ public static class IObservableSample
             catch (Exception ex)
             {
                 observer.OnError(ex);
+                throw;
             }
         }
 
@@ -189,7 +294,7 @@ public static class IObservableSample
         /// </returns>
         public IDisposable Subscribe(IObserver<T> observer)
         {
-            CancellationTokenDisposable disposable = new(masterToken);
+            CancellationTokenDisposable disposable = new(masterTokens);
 
             _ = ConsumeForObserver(observer, disposable.Token);
 
@@ -218,7 +323,7 @@ public static class IObservableSample
         /// </summary>
         public void OnCompleted()
         {
-            Console.WriteLine($"Fin Cons {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Fin consumption {identifier} / {Environment.CurrentManagedThreadId}");
             _taskCompletion.SetResult();
         }
 
@@ -228,7 +333,7 @@ public static class IObservableSample
         /// <param name="error">An object that provides additional information about the error.</param>
         public void OnError(Exception error)
         {
-            Console.WriteLine($"Exception in new value for consumer {identifier}: {error.Message}");
+            Console.WriteLine($"Exception in new value for consumption {identifier}: {error.Message}");
         }
 
         /// <summary>
@@ -241,39 +346,120 @@ public static class IObservableSample
         }
     }
 
+    /// <summary>
+    /// Observer class that consumes all events that occur for the async observers
+    /// </summary>
+    public class Consumer2(string identifier) : IObserver<int>
+    {
+        /// <summary>
+        /// The task completion source used to note when this observer has completed operations
+        /// </summary>
+        private readonly TaskCompletionSource _taskCompletion = new();
+
+        /// <summary>
+        /// Gets the task representing the operation of this observer.
+        /// </summary>
+        public Task Task => _taskCompletion.Task;
+
+        /// <summary>
+        /// Notifies the observer that the provider has finished sending push-based notifications.
+        /// </summary>
+        public void OnCompleted()
+        {
+            Console.WriteLine($"Fin modified consumption {identifier} / {Environment.CurrentManagedThreadId}");
+            _taskCompletion.SetResult();
+        }
+
+        /// <summary>
+        /// Notifies the observer that the provider has experienced an error condition.
+        /// </summary>
+        /// <param name="error">An object that provides additional information about the error.</param>
+        public void OnError(Exception error)
+        {
+            Console.WriteLine($"Exception in new value for modified consumption {identifier}: {error.Message}");
+        }
+
+        /// <summary>
+        /// Provides the observer with new data.
+        /// </summary>
+        /// <param name="value">The current notification information.</param>
+        public void OnNext(int value)
+        {
+            Console.WriteLine($"MODIFIED {identifier} / {Environment.CurrentManagedThreadId} => {value}");
+        }
+    }
+
 
 
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public static async Task Run(
+    public async Task Run(
         CancellationToken cancellationToken)
     {
         int producers = 5;
         int consumers = 9;
-
-        List<Consumer> consumerObservers = [];
-        List<IDisposable> consumerDisposables = [];
+        List<Task> productionTasks = [];
+        List<Task> tasks = [];
+        SemaphoreSlim synchronize = new(1);
 
         Producer producer = new(producers);
-        Task producerHost = producer.Run(cancellationToken);
+        tasks.Add(producer.Run(cancellationToken));
 
+        //We add lists for our observers and disposables
+        List<IObserver<int>> consumerObservers = [];
+        List<IDisposable> consumerDisposables = [];
+
+        // Get the observable via our extension method
         IObservable<int> observable = producer.ReadAllValuesAsync(cancellationToken).ToObservable(false, cancellationToken);
 
         for (int i = 0; i < consumers; ++i)
         {
             string name = $"Consumer {i}";
-            Consumer consumer = new(name);
+            // We need to construct IObserver instances and subscribe instead of running Tasks fire and forget (although that's happening below)
+            IObserver<int> consumer;
+            if (i % 2 == 0)
+            {
+                Consumer implementation = new(name);
+                tasks.Add(implementation.Task);
+                consumer = implementation;
+            }
+            else
+            {
+                Consumer2 implementation = new(name);
+                tasks.Add(implementation.Task);
+                consumer = implementation;
+            }
             consumerObservers.Add(consumer);
             consumerDisposables.Add(observable.Subscribe(consumer));
         }
 
-        await Task.WhenAll([producerHost, .. consumerObservers.Select(obs => obs.Task)]).ConfigureAwait(false);
+        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+        TaskCompletionSource backThreadSource = new();
+        Thread instanceCaller = new(new ThreadStart(() =>
+            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, cancellationToken)));
+        instanceCaller.Start();
+        tasks.Add(backThreadSource.Task);
 
-        foreach (IDisposable disposable in consumerDisposables)
+        try
         {
-            disposable.Dispose();
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            Console.WriteLine("All fin");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Console.WriteLine("Canceled");
+        }
+        finally
+        {
+            // have to dispose all these disposables now
+            foreach (IDisposable disposable in consumerDisposables)
+            {
+                disposable.Dispose();
+            }
+            synchronize.Dispose();
         }
     }
 }

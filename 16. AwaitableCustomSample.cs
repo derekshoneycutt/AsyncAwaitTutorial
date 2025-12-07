@@ -7,7 +7,11 @@ namespace AsyncAwaitTutorial;
 /// <summary>
 /// This sample demonstrates using a custom Awaiter to introduce async/await
 /// </summary>
-public static class AwaitableCustomSample
+/// <remarks>
+/// The major point of this one is to show how the compiler knows that Task can be await'ed, and the structure
+/// that it utilizes under the hood to operate.
+/// </remarks>
+public class AwaitableCustomSample : ITutorialSample
 {
     /// <summary>
     /// The custom task class to represent work being done in the thread pool
@@ -70,6 +74,7 @@ public static class AwaitableCustomSample
             }
         }
 
+        // We add the Awaiter struct and the GetAwaiter() method. This is a minimal implementation, but it is all that is required.
 
         /// <summary>
         /// The awaiter used to await on this task type in async/await
@@ -136,7 +141,7 @@ public static class AwaitableCustomSample
         {
             lock (_synchronize)
             {
-                if (IsCompleted)
+                if (_completed)
                 {
                     throw new InvalidOperationException("Cannot complete an already completed task.");
                 }
@@ -177,7 +182,7 @@ public static class AwaitableCustomSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
-            if (IsCompleted)
+            if (_completed)
             {
                 ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
             }
@@ -197,7 +202,7 @@ public static class AwaitableCustomSample
 
             lock (_synchronize)
             {
-                if (!IsCompleted)
+                if (!_completed)
                 {
                     reset = new();
                     SetContinuationUnprotected(reset.Set);
@@ -386,6 +391,7 @@ public static class AwaitableCustomSample
         }
     }
 
+    // We don't need an Iterate method any more
 
 
     /// <summary>
@@ -393,22 +399,25 @@ public static class AwaitableCustomSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstMax">The first range maximum.</param>
+    /// <param name="firstEnd">The first range maximum.</param>
     /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondMax">The second range maximum.</param>
+    /// <param name="secondEnd">The second range maximum.</param>
     /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task DoubleLoop(
+    public static async Task InstanceMethod(
         string identifier,
-        int firstStart, int firstMax, int secondStart, int secondMax)
+        int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstMax; i++)
+        // Now we can change the return to async Task and await on our MyTask.Delay
+        // We have to mix the standard Tasks in because async methods are compiled to return Task
+        // but we can see our custom task type working with the compiler now as well!
+        for (int i = firstStart; i <= firstEnd; i++)
         {
             await MyTask.Delay(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
-        for (int i = secondStart; i <= secondMax; i++)
+        for (int i = secondStart; i <= secondEnd; i++)
         {
             await MyTask.Delay(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
@@ -421,18 +430,25 @@ public static class AwaitableCustomSample
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
-    public static async Task Run()
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public async Task Run(CancellationToken cancellationToken)
     {
-        int threadCount = 55;
+        int actionCount = 55;
+        // We only work with Tasks in this method now
         List<Task> tasks = [];
-        for (int i = 0; i < threadCount; ++i)
+        AsyncLocal<int> mod = new();
+        for (int i = 0; i < actionCount; ++i)
         {
-            int mod = 10 * i;
+            mod.Value = 10 * i;
             string action = $"Action {i}";
+            // And we remove the wrapping call to Iterate, since we just get a full Task object now.
             tasks.Add(
-                DoubleLoop(action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod));
+                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
         }
 
+        // We can go ahead and await on the Task.WhenAll now, instead of Wait!
         await Task.WhenAll(tasks);
+
+        Console.WriteLine("All fin");
     }
 }

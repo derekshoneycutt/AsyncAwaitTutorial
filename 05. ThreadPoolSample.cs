@@ -4,7 +4,7 @@
 /// <summary>
 /// This sample demonstrates using the standard ThreadPool class. That's all
 /// </summary>
-public static class ThreadPoolSamples
+public class ThreadPoolSample : ITutorialSample
 {
     /// <summary>
     /// The number of actions to launch on the thread pool
@@ -20,21 +20,21 @@ public static class ThreadPoolSamples
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
-    /// <param name="firstMax">The first maximum value, completing the first range.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
-    /// <param name="secondMax">The second maximum value, completing the second range.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
     public static void InstanceMethod(
         string identifier,
-        int firstStart, int firstMax, int secondStart, int secondMax)
+        int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstMax; i++)
+        for (int i = firstStart; i <= firstEnd; i++)
         {
             Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
         }
-        for (int i = secondStart; i <= secondMax; i++)
+        for (int i = secondStart; i <= secondEnd; i++)
         {
             Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
@@ -52,15 +52,19 @@ public static class ThreadPoolSamples
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
-    public static void Run()
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public async Task Run(CancellationToken cancellationToken)
     {
-        _actionCount = 55;
+        int actionCount = 55;
+        _actionCount = actionCount;
+        AsyncLocal<int> mod = new();
         for (int i = 0; i < _actionCount; ++i)
         {
-            int mod = 10 * i;
+            mod.Value = 10 * i;
             string action = $"Action {i}";
+            // Move to the standard ThreadPool instead; performance optimizations exist here.
             ThreadPool.QueueUserWorkItem(_ => InstanceMethod(
-                action, 1 + mod, 5 + mod, 10001 + mod, 10005 + mod));
+                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
         }
 
         _resetEvent.Wait();

@@ -4,7 +4,11 @@
 /// <summary>
 /// Sample containing a demonstration of the IAsyncDisposable interface for disposing resource asynchronously
 /// </summary>
-public static class IAsyncDisposableSample
+/// <remarks>
+/// This one is a complete tangent with completely unrelated code. However, it is an important and useful
+/// tool for an async programmer's toolbox, and we we demonstrate it here.
+/// </remarks>
+public class IAsyncDisposableSample : ITutorialSample
 {
     /// <summary>
     /// Disposable class that writes to the console when it is disposing.
@@ -27,6 +31,7 @@ public static class IAsyncDisposableSample
             {
                 if (disposing)
                 {
+                    // We should *not* run into this one!
                     Console.WriteLine($"Disposing managed resources. {identifier}");
                 }
 
@@ -43,6 +48,7 @@ public static class IAsyncDisposableSample
         {
             if (!disposedValue)
             {
+                // We *should* run into this one!
                 Console.WriteLine($"Disposing managed resources asynchronously. {identifier}");
             }
         }
@@ -76,15 +82,17 @@ public static class IAsyncDisposableSample
     /// Runs sample code for the sample.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public static async Task Run(
+    public async Task Run(
         CancellationToken cancellationToken)
     {
         Console.WriteLine();
 
-        await using MyDisposable disposable2 = new("Disposable Major");
+        // This one will dispose at the very end of the method
+        await using var majorDisposable = new MyDisposable("Disposable Major").ConfigureAwait(false);
 
 
-        await using (MyDisposable disposable = new("Disposable Minor"))
+        // This one will dispose at the end of the code block that immediately follows.
+        await using (var minorDisposable = new MyDisposable("Disposable Minor").ConfigureAwait(false))
         {
             Console.WriteLine("Writing before dispose.");
         }
