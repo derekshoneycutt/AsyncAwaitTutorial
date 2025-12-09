@@ -39,29 +39,37 @@ namespace AsyncAwaitTutorial;
 /// </summary>
 public class StateMachineSample : ITutorialSample
 {
-    /// <summary>
-    /// Enum describing the current position of the state machine
-    /// </summary>
-    public enum StatePosition
-    {
-        Initial,
-
-        FirstLoop,
-
-        SecondLoop,
-
-        End
-    }
 
     /// <summary>
     /// State class managed by the state machine
     /// </summary>
-    public class MyState(int firstStart, int firstEnd, int secondStart, int secondEnd)
+    public record MyState(
+        string Identifier,
+        int FirstStart, int FirstEnd, int SecondStart, int SecondEnd)
     {
         /// <summary>
-        /// Gets or sets the current position of the operation.
+        /// Enum describing the current position of the state machine
         /// </summary>
-        public StatePosition Position { get; set; } = StatePosition.Initial;
+        private enum StatePosition
+        {
+            Initial,
+
+            FirstLoop,
+
+            SecondLoop,
+
+            End
+        }
+
+        /// <summary>
+        /// The current position of the operation.
+        /// </summary>
+        private StatePosition _position = StatePosition.Initial;
+
+        /// <summary>
+        /// The current value representing the end value the state machine is reaching for in the current "loop"
+        /// </summary>
+        private int _currentEnd  = -1;
 
         /// <summary>
         /// Gets or sets the current value represented by the state.
@@ -69,76 +77,60 @@ public class StateMachineSample : ITutorialSample
         public int Current { get; set; } = -1;
 
         /// <summary>
-        /// Gets the start of the first range to loop through.
+        /// Moves to the next position in the state machine.
         /// </summary>
-        public int FirstStart { get; init; } = firstStart <= firstEnd ? firstStart : firstEnd;
-
-        /// <summary>
-        /// Gets the max of the first range to loop through.
-        /// </summary>
-        public int FirstEnd { get; init; } = firstStart <= firstEnd ? firstEnd : firstStart;
-
-        /// <summary>
-        /// Gets the start of the second range to loop through.
-        /// </summary>
-        public int SecondStart { get; init; } = secondStart <= secondEnd ? secondStart : secondEnd;
-
-        /// <summary>
-        /// Gets the max of the second range to loop through.
-        /// </summary>
-        public int SecondEnd { get; init; } = secondStart <= secondEnd ? secondEnd : secondStart;
-    }
-
-    /// <summary>
-    /// Moves to the next position in the state machine.
-    /// </summary>
-    /// <param name="state">The state to advance to the next position.</param>
-    /// <returns>The current value of the state machine</returns>
-    /// <exception cref="InvalidOperationException">Cannot continue on a finished state machine.</exception>
-    public static bool MoveNext(MyState state)
-    {
-        bool FirstLoop()
+        /// <param name="state">The state to advance to the next position.</param>
+        /// <returns>Whether or not the state machine currently holds a valid state</returns>
+        public bool MoveNext()
         {
-            if (state.Current <= state.FirstEnd)
+            bool FirstLoop()
             {
-                Thread.Sleep(500);
-                state.Position = StatePosition.FirstLoop;
-                return true;
-            }
+                if (Current <= _currentEnd)
+                {
+                    Thread.Sleep(500);
+                    return true;
+                }
 
-            state.Current = state.SecondStart;
-            return SecondLoop();
-        }
-
-        bool SecondLoop()
-        {
-            if (state.Current <= state.SecondEnd)
-            {
-                Thread.Sleep(500);
-                state.Position = StatePosition.SecondLoop;
-                return true;
-            }
-
-            state.Position = StatePosition.End;
-            return false;
-        }
-
-        switch (state.Position)
-        {
-            case StatePosition.Initial:
-                state.Current = state.FirstStart;
-                return FirstLoop();
-
-            case StatePosition.FirstLoop:
-                ++state.Current;
-                return FirstLoop();
-
-            case StatePosition.SecondLoop:
-                ++state.Current;
+                _position = StatePosition.SecondLoop;
+                (Current, _currentEnd) = SecondStart <= SecondEnd ? (SecondStart, SecondEnd) : (SecondEnd, SecondStart);
+                Current = SecondStart;
                 return SecondLoop();
+            }
 
-            default:
-                throw new InvalidOperationException("Cannot continue on a finished state machine.");
+            bool SecondLoop()
+            {
+                if (Current <= _currentEnd)
+                {
+                    Thread.Sleep(500);
+                    return true;
+                }
+
+                _position = StatePosition.End;
+
+                Console.WriteLine($"Fin producer {Identifier} / {Environment.CurrentManagedThreadId}");
+                return false;
+            }
+
+            switch (_position)
+            {
+                case StatePosition.Initial:
+                    Console.WriteLine($"Writing producer: {Identifier} / {Environment.CurrentManagedThreadId}");
+
+                    (Current, _currentEnd) = FirstStart <= FirstEnd ? (FirstStart, FirstEnd) : (FirstEnd, FirstStart);
+                    _position = StatePosition.FirstLoop;
+                    return FirstLoop();
+
+                case StatePosition.FirstLoop:
+                    ++Current;
+                    return FirstLoop();
+
+                case StatePosition.SecondLoop:
+                    ++Current;
+                    return SecondLoop();
+
+                default:
+                    throw new InvalidOperationException("Cannot continue on a finished state machine.");
+            }
         }
     }
 
@@ -153,7 +145,7 @@ public class StateMachineSample : ITutorialSample
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        while (MoveNext(myState))
+        while (myState.MoveNext())
         {
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {myState.Current}");
         }
@@ -173,7 +165,7 @@ public class StateMachineSample : ITutorialSample
             int mod = 10 * i;
             string identifier = $"Action {i + 1}";
             // Create and pass the new state object here
-            MyState myState = new(
+            MyState myState = new(identifier,
                 1 + mod, 5 + mod,
                 1001 + mod, 1005 + mod);
             InstanceMethod(identifier, myState);

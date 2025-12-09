@@ -156,7 +156,6 @@ public class CustomAsyncEnumerableSample : ITutorialSample
                 if (Current <= end)
                 {
                     await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                    _position = StatePosition.InLoop;
                     return true;
                 }
 
@@ -180,6 +179,7 @@ public class CustomAsyncEnumerableSample : ITutorialSample
                         await signalSecondLoop.WaitAsync(cancellationToken).ConfigureAwait(false);
                     }
                     Current = start;
+                    _position = StatePosition.InLoop;
                     return await Loop().ConfigureAwait(false);
 
                 case StatePosition.InLoop:

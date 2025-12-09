@@ -40,40 +40,47 @@ namespace AsyncAwaitTutorial;
 public class IEnumerableSample : ITutorialSample
 {
     /// <summary>
-    /// Enum describing the current position of the state being iterated over
-    /// </summary>
-    public enum StatePosition
-    {
-        Initial,
-
-        FirstLoop,
-
-        SecondLoop,
-
-        End
-    }
-
-    /// <summary>
     /// The enumerator that moves to the next position with each MoveNext
     /// </summary>
     /// <seealso cref="IEnumerator{Int32}" />
-    public class MyEnumerator(int firstStart, int firstEnd, int secondStart, int secondEnd)
+    public class MyEnumerator(
+        string identifier,
+        int firstStart, int firstEnd, int secondStart, int secondEnd)
         : IEnumerator<int>
     {
+        /// <summary>
+        /// Enum describing the current position of the state being iterated over
+        /// </summary>
+        private enum StatePosition
+        {
+            Initial,
+
+            FirstLoop,
+
+            SecondLoop,
+
+            End
+        }
+
         /// <summary>
         /// The current position of the state we are iterating over
         /// </summary>
         private StatePosition _position = StatePosition.Initial;
 
         /// <summary>
-        /// Gets the element in the collection at the current position of the enumerator.
+        /// The current value representing the end value the state machine is reaching for in the current "loop"
         /// </summary>
-        object IEnumerator.Current => Current;
+        private int _currentEnd = -1;
 
         /// <summary>
         /// Gets the element in the collection at the current position of the enumerator.
         /// </summary>
         public int Current { get; private set; } = -1;
+
+        /// <summary>
+        /// Gets the element in the collection at the current position of the enumerator.
+        /// </summary>
+        object IEnumerator.Current => Current;
 
         /// <summary>
         /// Advances the enumerator to the next element of the collection.
@@ -87,34 +94,39 @@ public class IEnumerableSample : ITutorialSample
             // We move our previous MoveNext into the MoveNext method of the enumerator with minor updates
             bool FirstLoop()
             {
-                if (Current <= firstEnd)
+                if (Current <= _currentEnd)
                 {
                     Thread.Sleep(500);
-                    _position = StatePosition.FirstLoop;
                     return true;
                 }
 
+                _position = StatePosition.SecondLoop;
+                (Current, _currentEnd) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
                 Current = secondStart;
                 return SecondLoop();
             }
 
             bool SecondLoop()
             {
-                if (Current <= secondEnd)
+                if (Current <= _currentEnd)
                 {
                     Thread.Sleep(500);
-                    _position = StatePosition.SecondLoop;
                     return true;
                 }
 
                 _position = StatePosition.End;
+
+                Console.WriteLine($"Fin producer {identifier} / {Environment.CurrentManagedThreadId}");
                 return false;
             }
 
             switch (_position)
             {
                 case StatePosition.Initial:
-                    Current = firstStart;
+                    Console.WriteLine($"Writing producer: {identifier} / {Environment.CurrentManagedThreadId}");
+
+                    (Current, _currentEnd) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+                    _position = StatePosition.FirstLoop;
                     return FirstLoop();
 
                 case StatePosition.FirstLoop:
@@ -152,7 +164,9 @@ public class IEnumerableSample : ITutorialSample
     /// Enumerable that loops over 2 ranges subsequently
     /// </summary>
     /// <seealso cref="IEnumerable{int}" />
-    public class MyEnumerable(int firstStart, int firstEnd, int secondStart, int secondEnd)
+    public class MyEnumerable(
+        string identifier,
+        int firstStart, int firstEnd, int secondStart, int secondEnd)
         : IEnumerable<int>
     {
 
@@ -165,16 +179,14 @@ public class IEnumerableSample : ITutorialSample
         /// </returns>
         public IEnumerator<int> GetEnumerator()
         {
-            (int startFirst, int endFirst) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-            (int startSecond, int endSecond) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-            return new MyEnumerator(startFirst, endFirst, startSecond, endSecond);
+            return new MyEnumerator(identifier, firstStart, firstEnd, secondStart, secondEnd);
         }
 
         /// <summary>
         /// Returns an enumerator that iterates through a collection.
         /// </summary>
         /// <returns>
-        /// An <see cref="T:System.Collections.IEnumerator" /> object that can be used to iterate through the collection.
+        /// An <see cref="IEnumerator" /> object that can be used to iterate through the collection.
         /// </returns>
         IEnumerator IEnumerable.GetEnumerator()
         {
@@ -217,7 +229,7 @@ public class IEnumerableSample : ITutorialSample
             int mod = 10 * i;
             string identifier = $"Action {i}";
             // Create and pass the new state object here
-            MyEnumerable values = new(
+            MyEnumerable values = new(identifier,
                 1 + mod, 5 + mod,
                 1001 + mod, 1005 + mod);
             InstanceMethod(identifier, values);

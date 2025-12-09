@@ -35,14 +35,18 @@ public class IteratorSample : ITutorialSample
     /// <summary>
     /// Returns an iterator that loops over 2 ranges of integers subsequently.
     /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first range start.</param>
     /// <param name="firstEnd">The first range maximum.</param>
     /// <param name="secondStart">The second range start.</param>
     /// <param name="secondEnd">The second range maximum.</param>
     /// <returns>An <see cref="IEnumerable{Int32}"/> that loops over 2 integer ranges subsequently.</returns>
     public static IEnumerable<int> DoubleLoop(
+        string identifier,
         int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
+        Console.WriteLine($"Writing producer: {identifier} / {Environment.CurrentManagedThreadId}");
+
         (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
         for (int value = start; value <= end; ++value)
         {
@@ -55,6 +59,8 @@ public class IteratorSample : ITutorialSample
             Thread.Sleep(500);
             yield return value;
         }
+
+        Console.WriteLine($"Fin producer {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
     /// <summary>
@@ -90,7 +96,7 @@ public class IteratorSample : ITutorialSample
             int mod = 10 * i;
             string identifier = $"Action {i}";
             // Call the iterator here
-            IEnumerable<int> values = DoubleLoop(
+            IEnumerable<int> values = DoubleLoop(identifier,
                 1 + mod, 5 + mod,
                 1001 + mod, 1005 + mod);
             InstanceMethod(identifier, values);
