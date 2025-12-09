@@ -89,7 +89,6 @@ public class StateMachineSample : ITutorialSample
         public int SecondEnd { get; init; } = secondStart <= secondEnd ? secondEnd : secondStart;
     }
 
-
     /// <summary>
     /// Moves to the next position in the state machine.
     /// </summary>
@@ -98,33 +97,45 @@ public class StateMachineSample : ITutorialSample
     /// <exception cref="InvalidOperationException">Cannot continue on a finished state machine.</exception>
     public static bool MoveNext(MyState state)
     {
+        bool FirstLoop()
+        {
+            if (state.Current <= state.FirstEnd)
+            {
+                Thread.Sleep(500);
+                state.Position = StatePosition.FirstLoop;
+                return true;
+            }
+
+            state.Current = state.SecondStart;
+            return SecondLoop();
+        }
+
+        bool SecondLoop()
+        {
+            if (state.Current <= state.SecondEnd)
+            {
+                Thread.Sleep(500);
+                state.Position = StatePosition.SecondLoop;
+                return true;
+            }
+
+            state.Position = StatePosition.End;
+            return false;
+        }
+
         switch (state.Position)
         {
             case StatePosition.Initial:
-                Thread.Sleep(500);
-                state.Position = StatePosition.FirstLoop;
                 state.Current = state.FirstStart;
-                return true;
+                return FirstLoop();
 
             case StatePosition.FirstLoop:
-                Thread.Sleep(500);
                 ++state.Current;
-                if (state.Current > state.FirstEnd)
-                {
-                    state.Current = state.SecondStart;
-                    state.Position = StatePosition.SecondLoop;
-                }
-                return true;
+                return FirstLoop();
 
             case StatePosition.SecondLoop:
-                Thread.Sleep(500);
                 ++state.Current;
-                if (state.Current > state.SecondEnd)
-                {
-                    state.Position = StatePosition.End;
-                    return false;
-                }
-                return true;
+                return SecondLoop();
 
             default:
                 throw new InvalidOperationException("Cannot continue on a finished state machine.");

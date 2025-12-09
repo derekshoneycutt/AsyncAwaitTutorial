@@ -124,14 +124,9 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         private StatePosition _position = StatePosition.Initial;
 
         /// <summary>
-        /// The current value that the enumerator will return
-        /// </summary>
-        private int _currentValue = 0;
-
-        /// <summary>
         /// Gets the element in the collection at the current position of the enumerator.
         /// </summary>
-        public int Current => _currentValue;
+        public int Current { get; private set; } = -1;
 
         /// <summary>
         /// Performs application-defined tasks associated with freeing, releasing, or
@@ -156,6 +151,25 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         /// </returns>
         public async ValueTask<bool> MoveNextAsync()
         {
+            async Task<bool> Loop()
+            {
+                if (Current <= end)
+                {
+                    await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+                    _position = StatePosition.InLoop;
+                    return true;
+                }
+
+                _position = StatePosition.End;
+                if (runFirstLoop)
+                {
+                    signalSecondLoop.Release();
+                }
+
+                Console.WriteLine($"Fin producer {identifier} / {Environment.CurrentManagedThreadId}");
+                return false;
+            }
+
             switch (_position)
             {
                 case StatePosition.Initial:
@@ -165,26 +179,12 @@ public class CustomAsyncEnumerableSample : ITutorialSample
                     {
                         await signalSecondLoop.WaitAsync(cancellationToken).ConfigureAwait(false);
                     }
-                    await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                    _position = StatePosition.InLoop;
-                    _currentValue = start;
-                    return true;
+                    Current = start;
+                    return await Loop().ConfigureAwait(false);
 
                 case StatePosition.InLoop:
-                    await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                    ++_currentValue;
-                    if (_currentValue > end)
-                    {
-                        _position = StatePosition.End;
-                        if (runFirstLoop)
-                        {
-                            signalSecondLoop.Release();
-                        }
-
-                        Console.WriteLine($"Fin producer {identifier} / {Environment.CurrentManagedThreadId}");
-                        return false;
-                    }
-                    return true;
+                    ++Current;
+                    return await Loop().ConfigureAwait(false);
 
                 default:
                     throw new InvalidOperationException("Cannot continue on a finished state machine.");

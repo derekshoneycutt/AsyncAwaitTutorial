@@ -84,34 +84,46 @@ public class IEnumerableSample : ITutorialSample
         /// <exception cref="InvalidOperationException">Cannot continue on a finished state machine.</exception>
         public bool MoveNext()
         {
-            // We move our MoveNextMyState into the MoveNext method of the enumerator with minor updates
+            // We move our previous MoveNext into the MoveNext method of the enumerator with minor updates
+            bool FirstLoop()
+            {
+                if (Current <= firstEnd)
+                {
+                    Thread.Sleep(500);
+                    _position = StatePosition.FirstLoop;
+                    return true;
+                }
+
+                Current = secondStart;
+                return SecondLoop();
+            }
+
+            bool SecondLoop()
+            {
+                if (Current <= secondEnd)
+                {
+                    Thread.Sleep(500);
+                    _position = StatePosition.SecondLoop;
+                    return true;
+                }
+
+                _position = StatePosition.End;
+                return false;
+            }
+
             switch (_position)
             {
                 case StatePosition.Initial:
-                    Thread.Sleep(500);
-                    _position = StatePosition.FirstLoop;
                     Current = firstStart;
-                    return true;
+                    return FirstLoop();
 
                 case StatePosition.FirstLoop:
-                    Thread.Sleep(500);
                     ++Current;
-                    if (Current > firstEnd)
-                    {
-                        Current = secondStart;
-                        _position = StatePosition.SecondLoop;
-                    }
-                    return true;
+                    return FirstLoop();
 
                 case StatePosition.SecondLoop:
-                    Thread.Sleep(500);
                     ++Current;
-                    if (Current > secondEnd)
-                    {
-                        _position = StatePosition.End;
-                        return false;
-                    }
-                    return true;
+                    return SecondLoop();
 
                 default:
                     throw new InvalidOperationException("Cannot continue on a finished state machine.");

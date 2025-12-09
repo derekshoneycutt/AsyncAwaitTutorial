@@ -16,7 +16,7 @@
  *  A.  Copy Step 29. We will update this code.
  *  
  *  B.  Construct IAsyncObservable<out T> and IAsyncObserver<in T>.
- *      We'll make everything async with ValueTask to ensure
+ *      We'll make everything async with Task/ValueTask to ensure
  *      efficiency when necessary, and we'll pass cancellation
  *      tokens everywhere as well.
  *      We want to consider that we may or may not want to run
@@ -99,7 +99,7 @@ public class IAsyncObservableSample : ITutorialSample
             completionSource.SetException(ex);
         }
     }
-    
+
     /// <summary>
     /// Interface describing an asynchronous observable object
     /// </summary>
@@ -110,14 +110,12 @@ public class IAsyncObservableSample : ITutorialSample
         /// Notifies the provider that an observer is to receive notifications.
         /// </summary>
         /// <param name="observer">The object that is to receive notifications.</param>
-        /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
         /// <returns>
         /// A reference to an interface that allows observers to stop receiving notifications before the provider has finished sending them.
         /// </returns>
-        ValueTask<IAsyncDisposable> SubscribeAsync(
+        Task SubscribeAsync(
             IAsyncObserver<T> observer,
-            bool continueOnCapturedContext = true,
             CancellationToken cancellationToken = default);
     }
 
@@ -127,11 +125,6 @@ public class IAsyncObservableSample : ITutorialSample
     /// <typeparam name="T">The type of data that is being observed in the class.</typeparam>
     public interface IAsyncObserver<in T>
     {
-        /// <summary>
-        /// Gets a task that represents the observer's activity, completing on completed, error, or cancellation
-        /// </summary>
-        Task Completion { get; }
-
         /// <summary>
         /// Notifies the observer that the provider has finished sending push-based notifications, as an asynchronous operation.
         /// </summary>
@@ -181,49 +174,11 @@ public class IAsyncObservableSample : ITutorialSample
     /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
     /// <param name="masterToken">The cancellation token used to signal that a process should not complete. This is extended to all observers that subscribe.</param>
     public class AsyncObservable<T>(
-        IAsyncEnumerable<T> source)
+        IAsyncEnumerable<T> source,
+        bool continueOnCapturedContext = true)
         : IAsyncObservable<T>
     {
-        /// <summary>
-        /// Simple disposable class that cancels a cancellation token upon disposal
-        /// </summary>
-        public class CancellationTokenDisposable
-            : IDisposable, IAsyncDisposable
-        {
-            /// <summary>
-            /// The cancellation source that should be cancelled on disposal
-            /// </summary>
-            private readonly CancellationTokenSource _cancellationSource = new();
-
-            /// <summary>
-            /// Gets the token that is canceled when Dispose is run.
-            /// </summary>
-            public CancellationToken Token => _cancellationSource.Token;
-
-            /// <summary>
-            /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-            /// </summary>
-            public void Dispose()
-            {
-                _cancellationSource.Cancel();
-                _cancellationSource.Dispose();
-                GC.SuppressFinalize(this);
-            }
-
-            /// <summary>
-            /// Performs application-defined tasks associated with freeing, releasing, or
-            /// resetting unmanaged resources asynchronously.
-            /// </summary>
-            /// <returns>
-            /// A task that represents the asynchronous dispose operation.
-            /// </returns>
-            public async ValueTask DisposeAsync()
-            {
-                await _cancellationSource.CancelAsync();
-                _cancellationSource.Dispose();
-                GC.SuppressFinalize(this);
-            }
-        }
+        // We don't need that disposable thing
 
         /// <summary>
         /// Called when a new value is received, as an asynchronous operation.
@@ -234,7 +189,6 @@ public class IAsyncObservableSample : ITutorialSample
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
         protected virtual async Task OnNewValueAsync(
             IAsyncObserver<T> observer, T value,
-            bool continueOnCapturedContext,
             CancellationToken cancellationToken)
         {
             try
@@ -255,21 +209,22 @@ public class IAsyncObservableSample : ITutorialSample
         }
 
         /// <summary>
-        /// Consumes the enumerable for a observer object.
+        /// Notifies the provider that an observer is to receive notifications.
         /// </summary>
-        /// <param name="observer">The observer to consume for.</param>
-        /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
+        /// <param name="observer">The object that is to receive notifications.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        private async Task ConsumeForObserver(
+        /// <returns>
+        /// A reference to an interface that allows observers to stop receiving notifications before the provider has finished sending them.
+        /// </returns>
+        public async Task SubscribeAsync(
             IAsyncObserver<T> observer,
-            bool continueOnCapturedContext,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             try
             {
                 await foreach (T value in source.WithCancellation(cancellationToken).ConfigureAwait(continueOnCapturedContext))
                 {
-                    await OnNewValueAsync(observer, value, continueOnCapturedContext, cancellationToken).ConfigureAwait(continueOnCapturedContext);
+                    await OnNewValueAsync(observer, value, cancellationToken).ConfigureAwait(continueOnCapturedContext);
                 }
 
                 await observer.OnCompletedAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext);
@@ -277,34 +232,13 @@ public class IAsyncObservableSample : ITutorialSample
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 await observer.OnCanceledAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext);
+                throw;
             }
             catch (Exception ex)
             {
                 await observer.OnErrorAsync(ex, cancellationToken).ConfigureAwait(continueOnCapturedContext);
+                throw;
             }
-        }
-
-        /// <summary>
-        /// Notifies the provider that an observer is to receive notifications.
-        /// </summary>
-        /// <param name="observer">The object that is to receive notifications.</param>
-        /// <param name="continueOnCapturedContext">If <c>true</c> will capture the current execution context and attempt to return to the same context after await.</param>
-        /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        /// <returns>
-        /// A reference to an interface that allows observers to stop receiving notifications before the provider has finished sending them.
-        /// </returns>
-        public async ValueTask<IAsyncDisposable> SubscribeAsync(
-            IAsyncObserver<T> observer,
-            bool continueOnCapturedContext = true,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            CancellationTokenDisposable disposable = new();
-
-            _ = ConsumeForObserver(observer, continueOnCapturedContext, disposable.Token);
-
-            return disposable;
         }
     }
 
@@ -322,7 +256,6 @@ public class IAsyncObservableSample : ITutorialSample
         /// Produces the first range of values to the consumer, with a delay between each production
         /// </summary>
         /// <param name="identifier">The identifier of the producer method to report as.</param>
-        /// <param name="channel">The channel to produce values onto.</param>
         /// <param name="start">The start of the range of values to produce.</param>
         /// <param name="end">The end of the range of values to produce.</param>
         /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
@@ -351,7 +284,6 @@ public class IAsyncObservableSample : ITutorialSample
         /// Produces the second range of values to the consumer, with a delay between each production
         /// </summary>
         /// <param name="identifier">The identifier of the producer method to report as.</param>
-        /// <param name="channel">The channel to produce values onto.</param>
         /// <param name="start">The start of the range of values to produce.</param>
         /// <param name="end">The end of the range of values to produce.</param>
         /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
@@ -434,22 +366,11 @@ public class IAsyncObservableSample : ITutorialSample
         : IAsyncObserver<int>
     {
         /// <summary>
-        /// The task completion source used to note when this observer has completed operations
-        /// </summary>
-        private readonly TaskCompletionSource _taskCompletion = new();
-
-        /// <summary>
-        /// Gets the task representing the operation of this observer.
-        /// </summary>
-        public Task Completion => _taskCompletion.Task;
-
-        /// <summary>
         /// Notifies the observer that the provider has finished sending push-based notifications.
         /// </summary>
         public async ValueTask OnCompletedAsync(CancellationToken cancellationToken)
         {
             Console.WriteLine($"Fin consumption {identifier} / {Environment.CurrentManagedThreadId}");
-            _taskCompletion.SetResult();
         }
 
         /// <summary>
@@ -459,7 +380,6 @@ public class IAsyncObservableSample : ITutorialSample
         public async ValueTask OnErrorAsync(Exception error, CancellationToken cancellationToken)
         {
             Console.WriteLine($"Exception in consumption {identifier}: {error.Message}");
-            _taskCompletion.SetException(error);
         }
 
         /// <summary>
@@ -472,7 +392,6 @@ public class IAsyncObservableSample : ITutorialSample
         public async ValueTask OnCanceledAsync(CancellationToken canceledToken)
         {
             Console.WriteLine($"Consumption was canceled {identifier}");
-            _taskCompletion.SetCanceled(canceledToken);
         }
 
         /// <summary>
@@ -513,22 +432,11 @@ public class IAsyncObservableSample : ITutorialSample
     public class Consumer2(string identifier, SemaphoreSlim synchronize) : IAsyncObserver<int>
     {
         /// <summary>
-        /// The task completion source used to note when this observer has completed operations
-        /// </summary>
-        private readonly TaskCompletionSource _taskCompletion = new();
-
-        /// <summary>
-        /// Gets the task representing the operation of this observer.
-        /// </summary>
-        public Task Completion => _taskCompletion.Task;
-
-        /// <summary>
         /// Notifies the observer that the provider has finished sending push-based notifications.
         /// </summary>
         public async ValueTask OnCompletedAsync(CancellationToken cancellationToken)
         {
             Console.WriteLine($"Fin modified consumption {identifier} / {Environment.CurrentManagedThreadId}");
-            _taskCompletion.SetResult();
         }
 
         /// <summary>
@@ -538,7 +446,6 @@ public class IAsyncObservableSample : ITutorialSample
         public async ValueTask OnErrorAsync(Exception error, CancellationToken cancellationToken)
         {
             Console.WriteLine($"Exception in modified consumption {identifier}: {error.Message}");
-            _taskCompletion.SetException(error);
         }
 
         /// <summary>
@@ -551,7 +458,6 @@ public class IAsyncObservableSample : ITutorialSample
         public async ValueTask OnCanceledAsync(CancellationToken canceledToken)
         {
             Console.WriteLine($"Modified consumption was canceled {identifier}");
-            _taskCompletion.SetCanceled(canceledToken);
         }
 
         /// <summary>
@@ -600,7 +506,6 @@ public class IAsyncObservableSample : ITutorialSample
         SemaphoreSlim synchronize = new(1);
 
         // update to async interfaces
-        List<IAsyncDisposable> consumerDisposables = [];
         AsyncObservable<int> observable = new(producer.ReadAllAsync(cancellationToken));
 
         for (int i = 0; i < consumers; ++i)
@@ -611,17 +516,15 @@ public class IAsyncObservableSample : ITutorialSample
             if (i % 2 == 0)
             {
                 Consumer implementation = new(name, synchronize);
-                tasks.Add(implementation.Completion);
                 consumer = implementation;
             }
             else
             {
                 Consumer2 implementation = new(name, synchronize);
-                tasks.Add(implementation.Completion);
                 consumer = implementation;
             }
             // update to async interfaces
-            consumerDisposables.Add(await observable.SubscribeAsync(consumer, false, cancellationToken).ConfigureAwait(false));
+            tasks.Add(observable.SubscribeAsync(consumer, cancellationToken));
         }
 
         tasks.Add(producer.Run(cancellationToken));
@@ -645,11 +548,7 @@ public class IAsyncObservableSample : ITutorialSample
         }
         finally
         {
-            // update to async interfaces
-            foreach (IAsyncDisposable disposable in consumerDisposables)
-            {
-                await disposable.DisposeAsync();
-            }
+            // We don't have the disposables list any more
             synchronize.Dispose();
         }
     }
