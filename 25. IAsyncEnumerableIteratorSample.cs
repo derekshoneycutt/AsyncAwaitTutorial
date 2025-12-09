@@ -1,8 +1,35 @@
-﻿using System.Runtime.CompilerServices;
+﻿/*
+ * =====================================================
+ *         Step 25 : IAsyncEnumerable Iterators
+ * 
+ *  Now we go back and use iterator methods instead of the whole
+ *  custom implementation of the interfaces. The compiler will
+ *  now do all that for us, and we get much cleaner, easier to
+ *  read and maintain code.
+ *  
+ *  A.  Copy Step 24. We will update this code.
+ *  
+ *  B.  The easiest way to do this is copy FirstLoop and SecondLoop
+ *      from Sample 23 and convert them into async IAsyncEnumerable
+ *      that include the Delay, semaphore WaitAsync, and
+ *      directly yield returns the value.
+ *      The custom implementation can be removed with these in place.
+ *      
+ *  C.  Update Run to use the iterator methods instead of the custom
+ *      implementations. This should be very easy.
+ *      
+ *      
+ *  We now have a decoupled producer/consumer pattern in our code
+ *  that makes it much easier to read and maintain.
+ *  We do still have the same issue that Concat is not actually running
+ *  our producers at the same time, however.
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.CompilerServices;
 
 namespace AsyncAwaitTutorial;
-
-
 
 /// <summary>
 /// This sample demonstrates construction of an IAsyncEnumerable as an async iterator method
@@ -29,17 +56,19 @@ public class IAsyncEnumerableGeneratorSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstEnd; i++)
+            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            for (int i = secondStart; i <= secondEnd; i++)
+            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -56,28 +85,65 @@ public class IAsyncEnumerableGeneratorSample : ITutorialSample
             completionSource.SetException(ex);
         }
     }
-
-
-
     /// <summary>
-    /// Gets a range of values with an asynchronous delay before each one.
+    /// Gets an enumerable of tasks that will produce the given range of Tasks that return the given number after a delay
     /// </summary>
-    /// <param name="start">The start.</param>
-    /// <param name="end">The end.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>An asynchronous collection that iterates after each delay when a new number is still in range.</returns>
-    public static async IAsyncEnumerable<int> GetRange(
+    /// <param name="identifier">The identifier of the action to print the value for.</param>
+    /// <param name="start">The start of the range to produce.</param>
+    /// <param name="end">The end of the range to produce.</param>
+    /// <param name="secondLoopSignal">The second loop signal to trigger when the loop has completed.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public static async IAsyncEnumerable<int> FirstLoop(
+        string identifier,
         int start, int end,
+        SemaphoreSlim secondLoopSignal,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // And we use the iterator method with async/await AND yield return together instead of the custom class!
-        for (int i = start; i <= end; ++i)
+        // We update this to an IAsyncEnumerable that does the delay in here and yield returns the value directly
+
+        Console.WriteLine($"Writing first producer: {identifier} / {Environment.CurrentManagedThreadId}");
+
+        (int doStart, int doEnd) = start <= end ? (start, end) : (end, start);
+        for (int value = doStart; value <= doEnd; ++value)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-            yield return i;
+            yield return value;
         }
+
+        secondLoopSignal.Release();
+
+        Console.WriteLine($"Fin first producer {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
+    /// <summary>
+    /// Gets an enumerable of tasks that will produce the given range of Tasks that return the given number after a delay
+    /// </summary>
+    /// <param name="identifier">The identifier of the action to print the value for.</param>
+    /// <param name="start">The start of the range to produce.</param>
+    /// <param name="end">The end of the range to produce.</param>
+    /// <param name="secondLoopSignal">The second loop signal to wait until it is triggered to run the loop.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public static async IAsyncEnumerable<int> SecondLoop(
+        string identifier,
+        int start, int end,
+        SemaphoreSlim secondLoopSignal,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // We update this to an IAsyncEnumerable that does the delay in here and yield returns the value directly
+
+        Console.WriteLine($"Writing second producer: {identifier} / {Environment.CurrentManagedThreadId}");
+
+        await secondLoopSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        (int doStart, int doEnd) = start <= end ? (start, end) : (end, start);
+        for (int value = doStart; value <= doEnd; ++value)
+        {
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            yield return value;
+        }
+
+        Console.WriteLine($"Fin second producer {identifier} / {Environment.CurrentManagedThreadId}");
+    }
 
     /// <summary>
     /// Called when a new value is received in one of the main loops.
@@ -86,7 +152,7 @@ public class IAsyncEnumerableGeneratorSample : ITutorialSample
     /// <param name="value">The value to print.</param>
     /// <param name="synchronize">The semaphore used to synchronize console output.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    private static async Task OnNewValue(
+    private static async Task OnNewValueAsync(
         string identifier,
         int value,
         SemaphoreSlim synchronize,
@@ -105,69 +171,29 @@ public class IAsyncEnumerableGeneratorSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Loops over the first of integers subsequently as an asynchronous operation
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstEnd">The first range maximum.</param>
-    /// <param name="secondLoopSignal">The semaphore to signal when the first loop is complete.</param>
+    /// <param name="values">The values stream to consume.</param>
     /// <param name="synchronize">The semaphore used to synchronize printing values to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task FirstLoop(
+    public static async Task Consumer(
         string identifier,
-        int firstStart, int firstEnd,
-        SemaphoreSlim secondLoopSignal,
+        IAsyncEnumerable<int> values,
         SemaphoreSlim synchronize,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine($"Writing first values: {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Writing consumer: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        // Call the async iterator method instead
-        IAsyncEnumerable<int> numbers = GetRange(firstStart, firstEnd, cancellationToken);
-        await foreach (int value in numbers.ConfigureAwait(false))
+        await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            await OnNewValue(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
+            await OnNewValueAsync(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
         }
 
-        secondLoopSignal.Release();
-
-        Console.WriteLine($"Fin first {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin consumer {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
-    /// <summary>
-    /// Loops over the second range of integers subsequently as an asynchronous operation
-    /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondEnd">The second range maximum.</param>
-    /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
-    /// <param name="synchronize">The semaphore used to synchronize printing values to the screen.</param>
-    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task SecondLoop(
-        string identifier,
-        int secondStart, int secondEnd,
-        SemaphoreSlim secondLoopSignal,
-        SemaphoreSlim synchronize,
-        CancellationToken cancellationToken)
-    {
-        Console.WriteLine($"Writing second values: {identifier} / {Environment.CurrentManagedThreadId}");
-
-        await secondLoopSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        // Call the async iterator method instead
-        IAsyncEnumerable<int> numbers = GetRange(secondStart, secondEnd, cancellationToken);
-        await foreach (int value in numbers.WithCancellation(cancellationToken))
-        {
-            await OnNewValue(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
-        }
-
-        Console.WriteLine($"Fin second {identifier} / {Environment.CurrentManagedThreadId}");
-    }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -184,19 +210,28 @@ public class IAsyncEnumerableGeneratorSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             SemaphoreSlim secondLoopSignal = new(0);
             semaphores.Add(secondLoopSignal);
+            // We update to call the iterators now instead
+            IAsyncEnumerable<int> values =
+                FirstLoop(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    secondLoopSignal, cancellationToken)
+                    .Concat(SecondLoop(identifier,
+                        1001 + mod.Value, 1005 + mod.Value,
+                        secondLoopSignal, cancellationToken));
             tasks.Add(
-                FirstLoop(action, 1 + mod.Value, 5 + mod.Value, secondLoopSignal, synchronize, cancellationToken));
-            tasks.Add(
-                SecondLoop(action, 10001 + mod.Value, 10005 + mod.Value, secondLoopSignal, synchronize, cancellationToken));
+                Consumer(identifier, values, synchronize, cancellationToken));
         }
 
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, cancellationToken)));
+            ThreadMethod("Single Thread",
+                1, 5,
+                101, 105,
+                backThreadSource, cancellationToken)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 

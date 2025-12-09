@@ -1,8 +1,29 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 1 : Procedural Sample
+ * 
+ *  The point of this sample is to show that we are running 2 loops,
+ *  printing the values, with a delay between each printing.
+ *  This is the basic idea of what we are trying to do in an
+ *  asynchronous way with future samples.
+ *  
+ *  
+ *  A.  Create InstanceMethod: take an identifier and 2 start/end sets
+ *      print start, loop start to end in each, printing values, then print end.
+ *      
+ *  B.  Run can be implemented to call InstanceMethod subsequently
+ *      a variable (set to 5?) number of times, one after the other
+ *      
+ * This really just gives us a logical basis for the procedure
+ * we want to do more asynchronously moving forward.
+ * 
+ * =====================================================
+*/
+
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// Samples setting the basic zero-basis, not even using threads or anything really.
-/// The point of this sample is to show that we are running 2 loops, printing the values, with a delay between each printing.
 /// </summary>
 public class ProceduralSample : ITutorialSample
 {
@@ -20,18 +41,20 @@ public class ProceduralSample : ITutorialSample
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(500);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(500);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
     /// <summary>
@@ -45,8 +68,10 @@ public class ProceduralSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             int mod = 10 * i;
-            string action = $"Action {i}";
-            InstanceMethod(action, 1 + mod, 5 + mod, 1001 + mod, 1005 + mod);
+            string identifier = $"Action {i + 1}";
+            InstanceMethod(identifier,
+                1 + mod, 5 + mod,
+                1001 + mod, 1005 + mod);
         }
 
         Console.WriteLine("All fin");

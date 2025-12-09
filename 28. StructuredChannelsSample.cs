@@ -1,16 +1,49 @@
-﻿using System.Threading.Channels;
+﻿/*
+ * =====================================================
+ *         Step 28 : Structuring and Organizing Channels Code
+ * 
+ *  Since we have this nice, decoupled channels code, we take
+ *  an opportunity to demonstrate one pattern that is often
+ *  seen with them, where a producer class produces values into
+ *  a private channel and offers a method returning 
+ *  IAsyncEnumerable that reads the values from the channel.
+ *  
+ *  A.  Copy Step 27. We will update this code.
+ *  
+ *  B.  Create a Producer class and move all of the Producer
+ *      related code into it.
+ *      Importantly, this will need a private Channel field,
+ *      the two private loop production methods, a Run method
+ *      to kick off the production of values, and
+ *      a ReadAllAsync method to consume the values.
+ *      
+ *  C.  Update Run to use the Producer class to generate the
+ *      production tasks. We'll send in from ReadAllAsync
+ *      on the Producer class to the consumers as before.
+ *      
+ *  D.  (Optional) We add some more exception handling throughout
+ *      our consumer methods so that we can have full control
+ *      over how they behave in cancellation, exceptions, etc.
+ *      
+ *      
+ *  This doesn't really show anything new, just organizes
+ *  the code a little bit easier. However, pay attention to
+ *  the pattern of a private field Channel that is never
+ *  exposed except as an IAsyncEnumerable for consumption.
+ *  This is a common pattern used with async code, which
+ *  ensures that the consumer does not have to be aware of
+ *  how production is actually happening in any way.
+ * 
+ * =====================================================
+*/
+
+using System.Threading.Channels;
 
 namespace AsyncAwaitTutorial;
-
 
 /// <summary>
 /// This sample demonstrates utilizing Channels in a structured way to demonstrate a stream of values from a central producer class.
 /// </summary>
-/// <remarks>
-/// We really just try to take the previous sample and wrap the Producer code into an isolated class,
-/// further decoupling it from whatever the consumers are doing with it.
-/// We also add some extra error handling in our consumers
-/// </remarks>
 public class StructuredChannelsSample : ITutorialSample
 {
     /// <summary>
@@ -33,17 +66,19 @@ public class StructuredChannelsSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstEnd; i++)
+            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            for (int i = secondStart; i <= secondEnd; i++)
+            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -61,7 +96,6 @@ public class StructuredChannelsSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Producer class used to generate integer values and 
     /// </summary>
@@ -75,7 +109,7 @@ public class StructuredChannelsSample : ITutorialSample
         private readonly Channel<int> _channel = Channel.CreateUnbounded<int>();
 
         /// <summary>
-        /// Producers the first range of values to the consumer, with a delay between each production
+        /// Produces the first range of values to the consumer, with a delay between each production
         /// </summary>
         /// <param name="identifier">The identifier of the producer method to report as.</param>
         /// <param name="channel">The channel to produce values onto.</param>
@@ -83,27 +117,30 @@ public class StructuredChannelsSample : ITutorialSample
         /// <param name="end">The end of the range of values to produce.</param>
         /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        public async Task FirstProducer(
+        private async Task FirstLoop(
             string identifier,
             int start, int end,
             SemaphoreSlim secondLoopSignal,
             CancellationToken cancellationToken)
         {
-            Console.WriteLine($"Producing first values: {identifier} / {Environment.CurrentManagedThreadId}");
+            // Use the field _channel instead of passing one in here
 
-            for (int i = start; i <= end; ++i)
+            Console.WriteLine($"Writing first values: {identifier} / {Environment.CurrentManagedThreadId}");
+
+            (int doStart, int doEnd) = start <= end ? (start, end) : (end, start);
+            for (int value = doStart; value <= doEnd; ++value)
             {
                 await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                await _channel.Writer.WriteAsync(i, cancellationToken).ConfigureAwait(false);
+                await _channel.Writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
             }
 
             secondLoopSignal.Release();
 
-            Console.WriteLine($"Fin first production {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Fin first values {identifier} / {Environment.CurrentManagedThreadId}");
         }
 
         /// <summary>
-        /// Producers the second range of values to the consumer, with a delay between each production
+        /// Produces the second range of values to the consumer, with a delay between each production
         /// </summary>
         /// <param name="identifier">The identifier of the producer method to report as.</param>
         /// <param name="channel">The channel to produce values onto.</param>
@@ -111,23 +148,26 @@ public class StructuredChannelsSample : ITutorialSample
         /// <param name="end">The end of the range of values to produce.</param>
         /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        public async Task SecondProducer(
+        private async Task SecondLoop(
             string identifier,
             int start, int end,
             SemaphoreSlim secondLoopSignal,
             CancellationToken cancellationToken)
         {
-            Console.WriteLine($"Producing second values: {identifier} / {Environment.CurrentManagedThreadId}");
+            // Use the field _channel instead of passing one in here
+
+            Console.WriteLine($"Writing second values: {identifier} / {Environment.CurrentManagedThreadId}");
 
             await secondLoopSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-            for (int i = start; i <= end; ++i)
+            (int doStart, int doEnd) = start <= end ? (start, end) : (end, start);
+            for (int value = doStart; value <= doEnd; ++value)
             {
                 await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                await _channel.Writer.WriteAsync(i, cancellationToken).ConfigureAwait(false);
+                await _channel.Writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
             }
 
-            Console.WriteLine($"Fin second production {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Fin second values {identifier} / {Environment.CurrentManagedThreadId}");
         }
 
         /// <summary>
@@ -146,13 +186,17 @@ public class StructuredChannelsSample : ITutorialSample
                 for (int i = 0; i < count; ++i)
                 {
                     mod.Value = 10 * i;
-                    string action = $"Action {i}";
+                    string identifier = $"Action {i}";
                     SemaphoreSlim secondLoopSignal = new(0);
                     semaphores.Add(secondLoopSignal);
                     productionTasks.Add(
-                        FirstProducer(action, 1 + mod.Value, 5 + mod.Value, secondLoopSignal, cancellationToken));
+                        FirstLoop(identifier,
+                            1 + mod.Value, 5 + mod.Value,
+                            secondLoopSignal, cancellationToken));
                     productionTasks.Add(
-                        SecondProducer(action, 10001 + mod.Value, 10005 + mod.Value, secondLoopSignal, cancellationToken));
+                        SecondLoop(identifier,
+                            1001 + mod.Value, 1005 + mod.Value,
+                            secondLoopSignal, cancellationToken));
                 }
 
                 await Task.WhenAll(productionTasks).ConfigureAwait(false);
@@ -173,7 +217,7 @@ public class StructuredChannelsSample : ITutorialSample
         /// </summary>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
         /// <returns>A <see cref="IAsyncEnumerable{Int32}"/> that iterates each time a new value is produced.</returns>
-        public IAsyncEnumerable<int> ReadAllValuesAsync(CancellationToken cancellationToken) =>
+        public IAsyncEnumerable<int> ReadAllAsync(CancellationToken cancellationToken) =>
             _channel.Reader.ReadAllAsync(cancellationToken);
     }
 
@@ -185,7 +229,7 @@ public class StructuredChannelsSample : ITutorialSample
     /// <param name="value">The value to print.</param>
     /// <param name="synchronize">The semaphore used to synchronize console output.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    private static async Task OnNewValue(
+    private static async Task OnNewValueAsync(
         string identifier,
         int value,
         SemaphoreSlim synchronize,
@@ -224,7 +268,7 @@ public class StructuredChannelsSample : ITutorialSample
     /// <param name="value">The value to print.</param>
     /// <param name="synchronize">The semaphore used to synchronize console output.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    private static async Task OnNewValue2(
+    private static async Task OnNewValue2Async(
         string identifier,
         int value,
         SemaphoreSlim synchronize,
@@ -256,7 +300,6 @@ public class StructuredChannelsSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Loops over the integers received from the channel and prints them, as an asynchronous operation
     /// </summary>
@@ -271,18 +314,17 @@ public class StructuredChannelsSample : ITutorialSample
         SemaphoreSlim synchronize,
         CancellationToken cancellationToken)
     {
-        // We take in a Producer directly instead of a channel now
         // Add some extra exception handling for good practice
         try
         {
-            Console.WriteLine($"Consuming values: {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Writing consumer: {identifier} / {Environment.CurrentManagedThreadId}");
 
             await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                await OnNewValue2(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
+                await OnNewValueAsync(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
             }
 
-            Console.WriteLine($"Fin consuming {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Fin consumer {identifier} / {Environment.CurrentManagedThreadId}");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -309,18 +351,17 @@ public class StructuredChannelsSample : ITutorialSample
         SemaphoreSlim synchronize,
         CancellationToken cancellationToken)
     {
-        // We take in a Producer directly instead of a channel now
         // Add some extra exception handling for good practice
         try
         {
-            Console.WriteLine($"Second consuming values: {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Writing second consumer: {identifier} / {Environment.CurrentManagedThreadId}");
 
             await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                await OnNewValue(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
+                await OnNewValue2Async(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
             }
 
-            Console.WriteLine($"Fin second consuming {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Fin second consumer {identifier} / {Environment.CurrentManagedThreadId}");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -333,8 +374,6 @@ public class StructuredChannelsSample : ITutorialSample
         }
     }
 
-
-
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
@@ -342,34 +381,37 @@ public class StructuredChannelsSample : ITutorialSample
     public async Task Run(
         CancellationToken cancellationToken)
     {
-        // take out what Producer now handles for us and just use Producer class in its stead
-        int producers = 5;
-        int consumers = 9;
-        List<Task> productionTasks = [];
+        int producers = 99;
+        int consumers = Environment.ProcessorCount * 2;
+        // We just create the Producer class instead of channel and list, etc. we had before
+        Producer producer = new(producers);
         List<Task> tasks = [];
         SemaphoreSlim synchronize = new(1);
-
-        Producer producer = new(producers);
-        tasks.Add(producer.Run(cancellationToken));
 
         for (int i = 0; i < consumers; ++i)
         {
             string name = $"Consumer {i}";
-            IAsyncEnumerable<int> collection = producer.ReadAllValuesAsync(cancellationToken);
+            // Read values from the Producer class instead of the channel directly
             if (i % 2 == 0)
             {
-                _ = Consumer(name, collection, synchronize, cancellationToken);
+                _ = Consumer(name, producer.ReadAllAsync(cancellationToken), synchronize, cancellationToken);
             }
             else
             {
-                _ = Consumer2(name, collection, synchronize, cancellationToken);
+                _ = Consumer2(name, producer.ReadAllAsync(cancellationToken), synchronize, cancellationToken);
             }
         }
+
+        // And run the producers
+        tasks.Add(producer.Run(cancellationToken));
 
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, cancellationToken)));
+            ThreadMethod("Single Thread",
+                1, 5,
+                101, 105,
+                backThreadSource, cancellationToken)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 

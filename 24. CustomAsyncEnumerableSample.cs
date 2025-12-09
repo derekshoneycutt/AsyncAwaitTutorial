@@ -1,13 +1,47 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 24 : First IAsyncEnumerable
+ * 
+ *  The previous sample gave us some motivations for the
+ *  IAsyncEnumerable, and so now we're actually going to make
+ *  one and utilize it effectively. The Concat method we use
+ *  for IAsyncEnumerable is new in .net10 (previously part of
+ *  Reactive Extensions), but it still has the same problem.
+ *  Nonetheless, we will be able to use await foreach now
+ *  and see how IAsyncEnumerable is constructed under the
+ *  hood.
+ *  
+ *  A.  Copy Step 23. We will update this code.
+ *  
+ *  B.  Similar to Step 12 and 13, we want to break down our
+ *      existing for loops into state machines that can be
+ *      expressed in the IAsyncEnumerable/IAsyncEnumerator
+ *      structure. In this, we create the implementation for
+ *      each.
+ *      
+ *  C.  Update the Consumer method to take and consume
+ *      IAsyncEnumerable<int> instead of the IEnumerable<Task<int>>.
+ *      This code is looking nicer.
+ *      
+ *  D.  Update Run as necessary as well. This should be minimal
+ *      if the implementation was created well.
+ *      
+ *      
+ *  Creating the state machine implementation of these methods
+ *  always looks like quite a lot to tackle, but it gives us
+ *  a good handle on how the compiler will treat the code we
+ *  produce in later steps. We do still have the same issue
+ *  that Concat is not actually running our producers at the
+ *  same time, however.
+ * 
+ * =====================================================
+*/
+
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates construction of an IAsyncEnumerable as a custom implementation
 /// </summary>
-/// <remarks>
-/// This take the previous sample and updates it with a custom implementation of IAsyncEnumerable and IAsyncEnumerator.
-/// Due to the decoupling of the 2 loops in a previous step, we just use a single loop in the enumerator state machine
-/// this time.
-/// </remarks>
 public class CustomAsyncEnumerableSample : ITutorialSample
 {
     /// <summary>
@@ -30,17 +64,19 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstEnd; i++)
+            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            for (int i = secondStart; i <= secondEnd; i++)
+            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -58,7 +94,6 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Enum describing the current position of the state being iterated over
     /// </summary>
@@ -75,7 +110,12 @@ public class CustomAsyncEnumerableSample : ITutorialSample
     /// Custom enumerator that moves along each value in the 2 ranges, pausing to delay asynchronously each instance
     /// </summary>
     /// <seealso cref="IAsyncEnumerator{Int32}" />
-    public class MyAsyncEnumerator(int start, int end, CancellationToken cancellationToken)
+    public class MyAsyncEnumerator(
+        string identifier,
+        int start, int end,
+        SemaphoreSlim signalSecondLoop,
+        bool runFirstLoop,
+        CancellationToken cancellationToken)
         : IAsyncEnumerator<int>
     {
         /// <summary>
@@ -106,7 +146,6 @@ public class CustomAsyncEnumerableSample : ITutorialSample
             return ValueTask.CompletedTask;
         }
 
-
         /// <summary>
         /// Advances the enumerator asynchronously to the next element of the collection.
         /// </summary>
@@ -115,12 +154,17 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         /// was successfully advanced to the next element, or <c>false</c> if the enumerator has passed the end
         /// of the collection.
         /// </returns>
-        /// <exception cref="System.InvalidOperationException">Cannot continue on a finished state machine.</exception>
         public async ValueTask<bool> MoveNextAsync()
         {
             switch (_position)
             {
                 case StatePosition.Initial:
+                    Console.WriteLine($"Writing producer: {identifier} / {Environment.CurrentManagedThreadId}");
+
+                    if (!runFirstLoop)
+                    {
+                        await signalSecondLoop.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    }
                     await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                     _position = StatePosition.InLoop;
                     _currentValue = start;
@@ -132,6 +176,12 @@ public class CustomAsyncEnumerableSample : ITutorialSample
                     if (_currentValue > end)
                     {
                         _position = StatePosition.End;
+                        if (runFirstLoop)
+                        {
+                            signalSecondLoop.Release();
+                        }
+
+                        Console.WriteLine($"Fin producer {identifier} / {Environment.CurrentManagedThreadId}");
                         return false;
                     }
                     return true;
@@ -142,21 +192,24 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Custom enumerable that will asynchronously iterate over 2 ranges with delays for each iteration
     /// </summary>
     /// <seealso cref="IAsyncEnumerable{Int32}" />
-    public class MyAsyncEnumerable(int start, int end)
+    public class MyAsyncEnumerable(
+        string identifier,
+        int start, int end,
+        SemaphoreSlim signalSecondLoop,
+        bool runFirstLoop)
         : IAsyncEnumerable<int>
     {
         public IAsyncEnumerator<int> GetAsyncEnumerator(
             CancellationToken cancellationToken = default)
         {
-            return new MyAsyncEnumerator(start, end, cancellationToken);
+            (int doStart, int doEnd) = start <= end ? (start, end) : (start, end);
+            return new MyAsyncEnumerator(identifier, doStart, doEnd, signalSecondLoop, runFirstLoop, cancellationToken);
         }
     }
-
 
     // We don't need the dual method thing any more, as we have sent the entire production of values off into the MyAsyncEnumerable functionality
 
@@ -167,7 +220,7 @@ public class CustomAsyncEnumerableSample : ITutorialSample
     /// <param name="value">The value to print.</param>
     /// <param name="synchronize">The semaphore used to synchronize console output.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    private static async Task OnNewValue(
+    private static async Task OnNewValueAsync(
         string identifier,
         int value,
         SemaphoreSlim synchronize,
@@ -190,66 +243,27 @@ public class CustomAsyncEnumerableSample : ITutorialSample
     /// Loops over the first of integers subsequently as an asynchronous operation
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstEnd">The first range maximum.</param>
-    /// <param name="secondLoopSignal">The semaphore to signal when the first loop is complete.</param>
+    /// <param name="values">The values stream to consume.</param>
     /// <param name="synchronize">The semaphore used to synchronize printing values to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task FirstLoop(
+    public static async Task Consumer(
         string identifier,
-        int firstStart, int firstEnd,
-        SemaphoreSlim secondLoopSignal,
+        IAsyncEnumerable<int> values,
         SemaphoreSlim synchronize,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine($"Writing first values: {identifier} / {Environment.CurrentManagedThreadId}");
+        // We update Consumer to handle IAsyncEnumerable now
 
-        // Just get a new MyAsyncEnumerable now instead
-        // await foreach on this gives us the value directly!
-        MyAsyncEnumerable numbers = new(firstStart, firstEnd);
-        await foreach (int value in numbers.WithCancellation(cancellationToken).ConfigureAwait(false))
+        Console.WriteLine($"Writing consumer: {identifier} / {Environment.CurrentManagedThreadId}");
+
+        await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            await OnNewValue(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
+            await OnNewValueAsync(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
         }
 
-        secondLoopSignal.Release();
-
-        Console.WriteLine($"Fin first {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin consumer {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
-    /// <summary>
-    /// Loops over the second range of integers subsequently as an asynchronous operation
-    /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondEnd">The second range maximum.</param>
-    /// <param name="secondLoopSignal">The semaphore that signals when the first loop is complete.</param>
-    /// <param name="synchronize">The semaphore used to synchronize printing values to the screen.</param>
-    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task SecondLoop(
-        string identifier,
-        int secondStart, int secondEnd,
-        SemaphoreSlim secondLoopSignal,
-        SemaphoreSlim synchronize,
-        CancellationToken cancellationToken)
-    {
-        Console.WriteLine($"Writing second values: {identifier} / {Environment.CurrentManagedThreadId}");
-
-        await secondLoopSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        // Just get a new MyAsyncEnumerable now instead
-        // await foreach on this gives us the value directly!
-        MyAsyncEnumerable numbers = new(secondStart, secondEnd);
-        await foreach (int value in numbers.WithCancellation(cancellationToken).ConfigureAwait(false))
-        {
-            await OnNewValue(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
-        }
-
-        Console.WriteLine($"Fin second {identifier} / {Environment.CurrentManagedThreadId}");
-    }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -266,19 +280,28 @@ public class CustomAsyncEnumerableSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             SemaphoreSlim secondLoopSignal = new(0);
             semaphores.Add(secondLoopSignal);
+            // We update to IAsyncEnumerable
+            IAsyncEnumerable<int> values =
+                new MyAsyncEnumerable(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    secondLoopSignal, true)
+                    .Concat(new MyAsyncEnumerable(identifier,
+                        1001 + mod.Value, 1005 + mod.Value,
+                        secondLoopSignal, false));
             tasks.Add(
-                FirstLoop(action, 1 + mod.Value, 5 + mod.Value, secondLoopSignal, synchronize, cancellationToken));
-            tasks.Add(
-                SecondLoop(action, 10001 + mod.Value, 10005 + mod.Value, secondLoopSignal, synchronize, cancellationToken));
+                Consumer(identifier, values, synchronize, cancellationToken));
         }
 
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, cancellationToken)));
+            ThreadMethod("Single Thread",
+                1, 5,
+                101, 105,
+                backThreadSource, cancellationToken)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 

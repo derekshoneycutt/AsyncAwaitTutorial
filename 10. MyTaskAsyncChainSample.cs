@@ -1,15 +1,55 @@
-﻿using System.Runtime.ExceptionServices;
+﻿/*
+ * =====================================================
+ *         Step 10 : Make a chained asynchronous version
+ * 
+ *  Here, we want to finally make a fully asynchronous version of
+ *  our method, using the old chained continuations method.
+ *  This showed up in the early days of asynchrony and was largely
+ *  replaced with async/await. It shows a lot of the motivations
+ *  for the new pattern.
+ *  
+ *  
+ *  A.  Copy Step 9. We will reuse all of this.
+ *  
+ *  B.  Create the CompletedTask static property to represent
+ *      a task that has already been completed.
+ *      
+ *  C.  First, update the existing ContinueWith to return
+ *      a task that tracks when the continuation method
+ *      has completed.
+ *      
+ *  D.  Use the existing Run and ContinueWith to create
+ *      new copies that take a Func<MyTask>. The continuation
+ *      must wait for the internal MyTask to return.
+ *      The new Run method will need a new RunAsyncTask structure.
+ *      The next sample will show us how the standard TPL
+ *      handles this somewhat differently, but it allows
+ *      us to explore the chaining method with our
+ *      task at this time.
+ *      
+ *  E.  Refactor the InstanceMethod into a chain of ContinueWith
+ *      calls to make it fully asynchronous.
+ *      We should return a MyTask from the method after this,
+ *      so we can remove the Task.Run earlier in Run method.
+ *      
+ * Refactoring requires some thought about how the algorithm
+ * we are constructing can be done with pseudo-recursion
+ * instead of loops. This makes it somewhat difficult.
+ * However, it is also really good practice to understand
+ * what the compiler is doing with async/await.
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
-
-
 
 /// <summary>
 /// This sample demonstrates creating an asynchronous chain of work utilizing the custom tasks previously created
 /// </summary>
 public class MyTaskAsyncChainSample : ITutorialSample
 {
-
     /// <summary>
     /// The custom task class to represent work being done in the thread pool
     /// </summary>
@@ -30,6 +70,26 @@ public class MyTaskAsyncChainSample : ITutorialSample
             }
         }
 
+        /// <summary>
+        /// Structure to store the continuation information currently requested for the task
+        /// </summary>
+        private readonly record struct RunContinuation(
+            Action? Continuation,
+            ExecutionContext? ExecutionContext);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning a task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunTask(
+            Action Action,
+            MyTask Task);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning an async task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunAsyncTask(
+            Func<MyTask> Action,
+            MyTask Task);
 
         /// <summary>
         /// The lock object used to synchronize between several threads
@@ -49,12 +109,7 @@ public class MyTaskAsyncChainSample : ITutorialSample
         /// <summary>
         /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
         /// </summary>
-        private Action? _continuation = null;
-
-        /// <summary>
-        /// The execution context that the task information should be run under
-        /// </summary>
-        private ExecutionContext? _executionContext = null;
+        private RunContinuation _continuation = new(null, null);
 
         /// <summary>
         /// Gets a value indicating whether this task has completed operations.
@@ -76,27 +131,31 @@ public class MyTaskAsyncChainSample : ITutorialSample
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
         /// </summary>
-        /// <param name="action">The action to execute.</param>
-        /// <param name="executionContext">The execution context to execute on.</param>
-        private static void Execute(
-            Action action,
-            ExecutionContext? executionContext = null)
+        /// <param name="continuation">The continuation data containing the action and the execution context to execute</param>
+        private static void Execute(RunContinuation continuation)
         {
-            if (executionContext is null)
+            if (continuation.Continuation is null)
             {
-                action();
+                return;
             }
-            else
+
+            ThreadPool.QueueUserWorkItem<RunContinuation>(continuation =>
             {
-                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
-            }
+                if (continuation.ExecutionContext is null)
+                {
+                    continuation.Continuation!();
+                }
+                else
+                {
+                    ExecutionContext.Run(continuation.ExecutionContext, act => ((Action)act!).Invoke(), continuation.Continuation);
+                }
+            }, continuation, true);
         }
 
         /// <summary>
         /// Marks the task as complete, with or without an exception
         /// </summary>
         /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
-        /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
         private void Complete(Exception? ex)
         {
             lock (_synchronize)
@@ -109,10 +168,7 @@ public class MyTaskAsyncChainSample : ITutorialSample
                 _completed = true;
                 _exception = ex;
 
-                if (_continuation is not null)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
-                }
+                Execute(_continuation);
             }
         }
 
@@ -132,7 +188,6 @@ public class MyTaskAsyncChainSample : ITutorialSample
             Complete(ex);
         }
 
-
         /// <summary>
         /// Sets the continuation for the task without any semaphore protection.
         /// </summary>
@@ -142,14 +197,14 @@ public class MyTaskAsyncChainSample : ITutorialSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
+            RunContinuation continuation = new(action, ExecutionContext.Capture());
             if (_completed)
             {
-                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
+                Execute(continuation);
             }
             else
             {
-                _continuation = action;
-                _executionContext = ExecutionContext.Capture();
+                _continuation = continuation;
             }
         }
 
@@ -177,7 +232,6 @@ public class MyTaskAsyncChainSample : ITutorialSample
             }
         }
 
-
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
@@ -186,7 +240,7 @@ public class MyTaskAsyncChainSample : ITutorialSample
         public MyTask ContinueWith(Action action)
         {
             // Update to return a Task that completes once the continuation has completed
-            MyTask returnTask = new();
+            MyTask task = new();
 
             lock (_synchronize)
             {
@@ -194,14 +248,12 @@ public class MyTaskAsyncChainSample : ITutorialSample
                 {
                     action();
 
-                    returnTask.SetResult();
+                    task.SetResult();
                 });
             }
 
-            return returnTask;
+            return task;
         }
-
-
 
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
@@ -212,31 +264,29 @@ public class MyTaskAsyncChainSample : ITutorialSample
         public MyTask ContinueWith(Func<MyTask> action)
         {
             // Add a version that handles an asynchronous continuation method that should be tracked
-            MyTask returnTask = new();
+            MyTask task = new();
 
             lock (_synchronize)
             {
                 SetContinuationUnprotected(() =>
                 {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
+                    MyTask next = action();
+                    next.ContinueWith(() =>
                     {
-                        if (followTask._exception is not null)
+                        if (next._exception is not null)
                         {
-                            returnTask.SetException(followTask._exception);
+                            task.SetException(next._exception);
                         }
                         else
                         {
-                            returnTask.SetResult();
+                            task.SetResult();
                         }
                     });
                 });
             }
 
-            return returnTask;
+            return task;
         }
-
-
 
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
@@ -245,26 +295,25 @@ public class MyTaskAsyncChainSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunTask>(task =>
             {
                 try
                 {
-                    action();
+                    task.Action();
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
+                    task.Task.SetException(ex);
                     return;
                 }
 
-                returnTask.SetResult();
-            });
+                task.Task.SetResult();
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
@@ -274,37 +323,33 @@ public class MyTaskAsyncChainSample : ITutorialSample
         public static MyTask Run(Func<MyTask> action)
         {
             // Add a version that handles an asynchronous method that should be tracked
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunAsyncTask>(task =>
             {
                 try
                 {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
+                    MyTask next = task.Action();
+                    next.ContinueWith(() =>
                     {
-                        if (followTask._exception is not null)
+                        if (next._exception is not null)
                         {
-                            returnTask.SetException(followTask._exception);
+                            task.Task.SetException(next._exception);
                         }
                         else
                         {
-                            returnTask.SetResult();
+                            task.Task.SetResult();
                         }
                     });
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
-                    return;
+                    task.Task.SetException(ex);
                 }
-            });
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
-
-
 
         /// <summary>
         /// Wait until all of the provided tasks have completed, as an asynchronous operation
@@ -313,12 +358,12 @@ public class MyTaskAsyncChainSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             List<MyTask> useTasks = [.. tasks];
             if (useTasks.Count < 1)
             {
-                returnTask.SetResult();
+                task.SetResult();
             }
             else
             {
@@ -328,19 +373,18 @@ public class MyTaskAsyncChainSample : ITutorialSample
                 {
                     if (Interlocked.Decrement(ref remaining) < 1)
                     {
-                        returnTask.SetResult();
+                        task.SetResult();
                     }
                 }
 
-                foreach (MyTask task in useTasks)
+                foreach (MyTask useTask in useTasks)
                 {
-                    task.ContinueWith(Continuation);
+                    useTask.ContinueWith(Continuation);
                 }
             }
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Delays for a specified timeout period as an asynchronous operation.
@@ -355,8 +399,6 @@ public class MyTaskAsyncChainSample : ITutorialSample
         }
     }
 
-
-
     /// <summary>
     /// The instance method to run as tasks.
     /// </summary>
@@ -370,39 +412,33 @@ public class MyTaskAsyncChainSample : ITutorialSample
         int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
         // Completely refactor to use chains of ContinueWith so that it is fully asynchronous for the first time
-
-        int i = firstStart;
-        MyTask IncrementAndPrint(int max)
+        (int value, int currentEnd) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        MyTask IncrementAndPrint(int end)
         {
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
-            ++i;
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
+            ++value;
 
-            if (i <= max)
+            if (value <= end)
             {
                 return MyTask.Delay(1000)
-                    .ContinueWith(() => IncrementAndPrint(max));
+                    .ContinueWith(() => IncrementAndPrint(end));
             }
-
-
             return MyTask.CompletedTask;
         }
 
-        return MyTask.Run(() =>
-        {
-            Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Writing values {identifier} / {Environment.CurrentManagedThreadId}");
 
-            return MyTask.Delay(1000)
-                .ContinueWith(() => IncrementAndPrint(firstEnd)
-                    .ContinueWith(() => MyTask.Delay(1000)
-                        .ContinueWith(() =>
-                        {
-                            i = secondStart;
-                            return IncrementAndPrint(secondEnd)
-                                .ContinueWith(() => Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}"));
-                        })));
-        });
+        return MyTask.Delay(1000)
+            .ContinueWith(() => IncrementAndPrint(currentEnd))
+            .ContinueWith(() =>
+            {
+                (value, currentEnd) = secondStart <= secondEnd ? (secondStart, secondEnd) : (firstEnd, secondStart);
+                value = secondStart;
+                return MyTask.Delay(1000);
+            })
+            .ContinueWith(() => IncrementAndPrint(currentEnd))
+            .ContinueWith(() => Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}"));
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -416,10 +452,12 @@ public class MyTaskAsyncChainSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // We don't need to do Task.Run any more because the method returns a direct Task already
-            tasks.Add(InstanceMethod(
-                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
+            tasks.Add(
+                InstanceMethod(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value));
         }
 
         MyTask.WhenAll(tasks).Wait();

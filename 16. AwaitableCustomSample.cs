@@ -1,8 +1,33 @@
-﻿using System.Runtime.CompilerServices;
+﻿/*
+ * =====================================================
+ *         Step 16 : First real async/await
+ * 
+ *  Now, we finally get to true async/await by modifying
+ *  our custom task class to work with the compiler
+ *  in actual async/await styles. This is just for demo
+ *  purposes, but exposes what is happening in the
+ *  compiler when we use async/await.
+ *  
+ *  A.  Copy Step 15. We will update this code.
+ *  
+ *  B.  Add Awaiter struct and GetAwaiter() method to the
+ *      custom Task structure. These must follow the
+ *      convention the compiler is looking for in order
+ *      to use await.
+ *      
+ *  C.  Refactor InstanceMethod to use async/await now.
+ *      
+ *      
+ * This is the final step so now everything we do will
+ * be async/await!
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
-
 
 /// <summary>
 /// This sample demonstrates using a custom Awaiter to introduce async/await
@@ -31,6 +56,26 @@ public class AwaitableCustomSample : ITutorialSample
             }
         }
 
+        /// <summary>
+        /// Structure to store the continuation information currently requested for the task
+        /// </summary>
+        private readonly record struct RunContinuation(
+            Action? Continuation,
+            ExecutionContext? ExecutionContext);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning a task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunTask(
+            Action Action,
+            MyTask Task);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning an async task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunAsyncTask(
+            Func<MyTask> Action,
+            MyTask Task);
 
         /// <summary>
         /// The lock object used to synchronize between several threads
@@ -50,12 +95,7 @@ public class AwaitableCustomSample : ITutorialSample
         /// <summary>
         /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
         /// </summary>
-        private Action? _continuation = null;
-
-        /// <summary>
-        /// The execution context that the task information should be run under
-        /// </summary>
-        private ExecutionContext? _executionContext = null;
+        private RunContinuation _continuation = new(null, null);
 
         /// <summary>
         /// Gets a value indicating whether this task has completed operations.
@@ -116,20 +156,25 @@ public class AwaitableCustomSample : ITutorialSample
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
         /// </summary>
-        /// <param name="action">The action to execute.</param>
-        /// <param name="executionContext">The execution context to execute on.</param>
-        private static void Execute(
-            Action action,
-            ExecutionContext? executionContext = null)
+        /// <param name="continuation">The continuation data containing the action and the execution context to execute</param>
+        private static void Execute(RunContinuation continuation)
         {
-            if (executionContext is null)
+            if (continuation.Continuation is null)
             {
-                action();
+                return;
             }
-            else
+
+            ThreadPool.QueueUserWorkItem<RunContinuation>(continuation =>
             {
-                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
-            }
+                if (continuation.ExecutionContext is null)
+                {
+                    continuation.Continuation!();
+                }
+                else
+                {
+                    ExecutionContext.Run(continuation.ExecutionContext, act => ((Action)act!).Invoke(), continuation.Continuation);
+                }
+            }, continuation, true);
         }
 
         /// <summary>
@@ -149,10 +194,7 @@ public class AwaitableCustomSample : ITutorialSample
                 _completed = true;
                 _exception = ex;
 
-                if (_continuation is not null)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
-                }
+                Execute(_continuation);
             }
         }
 
@@ -172,7 +214,6 @@ public class AwaitableCustomSample : ITutorialSample
             Complete(ex);
         }
 
-
         /// <summary>
         /// Sets the continuation for the task without any semaphore protection.
         /// </summary>
@@ -182,14 +223,14 @@ public class AwaitableCustomSample : ITutorialSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
+            RunContinuation continuation = new(action, ExecutionContext.Capture());
             if (_completed)
             {
-                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
+                Execute(continuation);
             }
             else
             {
-                _continuation = action;
-                _executionContext = ExecutionContext.Capture();
+                _continuation = continuation;
             }
         }
 
@@ -217,14 +258,13 @@ public class AwaitableCustomSample : ITutorialSample
             }
         }
 
-
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
         /// <param name="action">The action to perform once the initial task has completed.</param>
         public MyTask ContinueWith(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             lock (_synchronize)
             {
@@ -232,48 +272,43 @@ public class AwaitableCustomSample : ITutorialSample
                 {
                     action();
 
-                    returnTask.SetResult();
+                    task.SetResult();
                 });
             }
 
-            return returnTask;
+            return task;
         }
-
-
 
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
         /// <param name="action">The action to perform once the initial task has completed.</param>
         /// <returns>A Task that completes once the continuation task has also completed.</returns>
-
         public MyTask ContinueWith(Func<MyTask> action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             lock (_synchronize)
             {
                 SetContinuationUnprotected(() =>
                 {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
+                    MyTask next = action();
+                    next.ContinueWith(() =>
                     {
-                        if (followTask._exception is not null)
+                        if (next._exception is not null)
                         {
-                            returnTask.SetException(followTask._exception);
+                            task.SetException(next._exception);
                         }
                         else
                         {
-                            returnTask.SetResult();
+                            task.SetResult();
                         }
                     });
                 });
             }
 
-            return returnTask;
+            return task;
         }
-
-
 
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
@@ -282,26 +317,25 @@ public class AwaitableCustomSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunTask>(task =>
             {
                 try
                 {
-                    action();
+                    task.Action();
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
+                    task.Task.SetException(ex);
                     return;
                 }
 
-                returnTask.SetResult();
-            });
+                task.Task.SetResult();
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
@@ -310,37 +344,33 @@ public class AwaitableCustomSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Func<MyTask> action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunAsyncTask>(task =>
             {
                 try
                 {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
+                    MyTask next = task.Action();
+                    next.ContinueWith(() =>
                     {
-                        if (followTask._exception is not null)
+                        if (next._exception is not null)
                         {
-                            returnTask.SetException(followTask._exception);
+                            task.Task.SetException(next._exception);
                         }
                         else
                         {
-                            returnTask.SetResult();
+                            task.Task.SetResult();
                         }
                     });
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
-                    return;
+                    task.Task.SetException(ex);
                 }
-            });
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
-
-
 
         /// <summary>
         /// Wait until all of the provided tasks have completed, as an asynchronous operation
@@ -349,12 +379,12 @@ public class AwaitableCustomSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             List<MyTask> useTasks = [.. tasks];
             if (useTasks.Count < 1)
             {
-                returnTask.SetResult();
+                task.SetResult();
             }
             else
             {
@@ -364,19 +394,18 @@ public class AwaitableCustomSample : ITutorialSample
                 {
                     if (Interlocked.Decrement(ref remaining) < 1)
                     {
-                        returnTask.SetResult();
+                        task.SetResult();
                     }
                 }
 
-                foreach (MyTask task in useTasks)
+                foreach (MyTask useTask in useTasks)
                 {
-                    task.ContinueWith(Continuation);
+                    useTask.ContinueWith(Continuation);
                 }
             }
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Delays for a specified timeout period as an asynchronous operation.
@@ -392,7 +421,6 @@ public class AwaitableCustomSample : ITutorialSample
     }
 
     // We don't need an Iterate method any more
-
 
     /// <summary>
     /// Loops over 2 ranges of integers subsequently as an asynchronous operation
@@ -412,20 +440,21 @@ public class AwaitableCustomSample : ITutorialSample
         // Now we can change the return to async Task and await on our MyTask.Delay
         // We have to mix the standard Tasks in because async methods are compiled to return Task
         // but we can see our custom task type working with the compiler now as well!
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             await MyTask.Delay(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             await MyTask.Delay(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
         Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -440,10 +469,12 @@ public class AwaitableCustomSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // And we remove the wrapping call to Iterate, since we just get a full Task object now.
             tasks.Add(
-                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
+                InstanceMethod(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value));
         }
 
         // We can go ahead and await on the Task.WhenAll now, instead of Wait!

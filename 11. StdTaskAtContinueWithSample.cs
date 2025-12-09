@@ -1,6 +1,24 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 11 : Make a chained asynchronous version with Standard Task
+ * 
+ *  Now we show the same pattern we've developed just using the standard
+ *  Task class, with the standard TPL.
+ *  
+ *  
+ *  A.  Copy Step 10. We will reuse all of this.
+ *  
+ *  B.  Remove MyTask and update InstanceMethod to use just the normal
+ *      standard Task object. Have to add Unwrap calls to unwrap
+ *      the Task<Task>, which we previously did inside MyTask already.
+ *      
+ * This is a pretty simple step, just transitioning to the
+ * standard Task class now.
+ * 
+ * =====================================================
+*/
 
-
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates creating an asynchronous chain of work utilizing the standard Tasks
@@ -21,40 +39,32 @@ public class StdTaskAtContinueWithSample : ITutorialSample
     {
         // Refactor this to use just the standard Task
         // Note the addition of .Unwrap() in multiple places because standard Task returns Task<Task> instead of folding it as we have done in the previous samples
-        int i = firstStart;
-        Task IncrementAndPrint(int max)
+        (int value, int currentEnd) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        Task IncrementAndPrint(int end)
         {
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
-            ++i;
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
+            ++value;
 
-            if (i <= max)
+            if (value <= end)
             {
                 return Task.Delay(1000)
-                    .ContinueWith(_ => IncrementAndPrint(max))
-                    .Unwrap();
+                    .ContinueWith(_ => IncrementAndPrint(end)).Unwrap();
             }
-
             return Task.CompletedTask;
         }
 
-        return Task.Run(() =>
-        {
-            Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Writing values {identifier} / {Environment.CurrentManagedThreadId}");
 
-            return Task.Delay(1000)
-                .ContinueWith(_ => IncrementAndPrint(firstEnd)
-                    .ContinueWith(_ => Task.Delay(1000)
-                        .ContinueWith(_ =>
-                        {
-                            i = secondStart;
-                            return IncrementAndPrint(secondEnd)
-                                .ContinueWith(_ => Console.WriteLine(
-                                    $"Fin  {identifier} / {Environment.CurrentManagedThreadId}"));
-                        }).Unwrap()).Unwrap()).Unwrap();
-        });
+        return Task.Delay(1000)
+            .ContinueWith(_ => IncrementAndPrint(currentEnd)).Unwrap()
+            .ContinueWith(_ =>
+            {
+                (value, currentEnd) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+                return Task.Delay(1000);
+            }).Unwrap()
+            .ContinueWith(_ => IncrementAndPrint(currentEnd)).Unwrap()
+            .ContinueWith(_ => Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}"));
     }
-
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -69,9 +79,11 @@ public class StdTaskAtContinueWithSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
-            tasks.Add(InstanceMethod(
-                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
+            string identifier = $"Action {i}";
+            tasks.Add(
+                InstanceMethod(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value));
         }
 
         Task.WhenAll(tasks).Wait(cancellationToken);

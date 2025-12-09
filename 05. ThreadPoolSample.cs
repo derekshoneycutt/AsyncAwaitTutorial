@@ -1,11 +1,40 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 5 : Move to the standard Thread Pool
+ * 
+ *  Here, we just remove the custom thread pool and start
+ *  using the standard ThreadPool class. This is to get us
+ *  comfortable with this behavior, as it is more advanced
+ *  than what we did.
+ *  
+ *  
+ *  A.  Copy Step 4. We will reuse all of this.
+ *      
+ *  B.  Delete all of the custom thread pool and use ThreadPool.
+ *      QueueUserWorkItem call will need updated in this.
+ *      
+ *  C.  Create ThreadPoolState and demonstrate starting a
+ *      work item on the ThreadPool with some state.
+ *      
+ * This is a pretty simple one, but we can spend some time
+ * reviewing everything we've learned and see how it fits directly
+ * with what we have available in the standard library.
+ * 
+ * =====================================================
+*/
 
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates using the standard ThreadPool class. That's all
 /// </summary>
 public class ThreadPoolSample : ITutorialSample
 {
+    /// <summary>
+    /// State structure to send to the instance method for work items queued on the thread pool
+    /// </summary>
+    readonly record struct ThreadPoolState(string Identifier, AsyncLocal<int> Mod);
+
     /// <summary>
     /// The number of actions to launch on the thread pool
     /// </summary>
@@ -29,18 +58,20 @@ public class ThreadPoolSample : ITutorialSample
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
 
         if (Interlocked.Decrement(ref _actionCount) < 1)
         {
@@ -61,10 +92,13 @@ public class ThreadPoolSample : ITutorialSample
         for (int i = 0; i < _actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // Move to the standard ThreadPool instead; performance optimizations exist here.
-            ThreadPool.QueueUserWorkItem(_ => InstanceMethod(
-                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value));
+            ThreadPool.QueueUserWorkItem<ThreadPoolState>(state =>
+                InstanceMethod(state.Identifier,
+                    1 + state.Mod.Value, 5 + state.Mod.Value,
+                    1001 + state.Mod.Value, 1005 + state.Mod.Value),
+                new(identifier, mod), true);
         }
 
         _resetEvent.Wait();

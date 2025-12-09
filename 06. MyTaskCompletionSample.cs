@@ -1,18 +1,59 @@
-﻿using System.Runtime.ExceptionServices;
+﻿/*
+ * =====================================================
+ *         Step 6 : Create a basic Task Completion object
+ * 
+ *  We want to remove the static counter and ManualResetEvent
+ *  from the previous samples, and we want to track individual
+ *  work items on the thread queue. This introduces us to the
+ *  concept of Task. Here, we just introduce the basic
+ *  Task Completion pattern which we will see repeatedly
+ *  and which serve as a basis for the reason for Task.
+ *  Again, we are not trying to perfectly re-create Task
+ *  or even the start of TaskCompletionSource, per se,
+ *  but we do want to demonstrate the patterns and concepts.
+ *  
+ *  
+ *  A.  Copy Step 5. We will reuse all of this.
+ *      
+ *  B.  Create a new MyTaskCompletion class that will
+ *      serve to track the progress of a work item on the
+ *      thread pool. We will need a synchronization Lock,
+ *      a completed flag, and an exception for fields.
+ *      IsCompleted will be our one public property.
+ *     
+ *  C.  We want methods SetResult, SetException, and Wait.
+ *      We can have a Complete private method to work for
+ *      both SetResult and SetException.
+ *      
+ *  D.  Introduce a list of these Task Completion objects in the
+ *      Run method, and create and pass one to each instance of
+ *      InstanceMethod. Wait on these Tasks at the end of Run.
+ *      
+ *  E.  Update InstanceMethod for both SetResult and SetException,
+ *      requiring a wrapping try...catch block.
+ *      
+ * This is a lift to create a structure for tracking the Tasks
+ * that we run on the ThreadPool. However, the pattern produced
+ * in the InstanceMethod of this sample is repeated again and again
+ * in the following samples, so it is important to understand it.
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
-
 
 /// <summary>
 /// This sample demonstrates creating a basic task completion class to track tasks on the thread pool.
 /// </summary>
-/// <remarks>
-/// At this stage, the major goal is to demonstration something akin to the TaskCompletionSource that we will
-/// demonstrate later, when we have full async/await. Nonetheless, the basic pattern is important and
-/// used thoroughly in the future, so the basics are constructed and demonstrated here for that pattern.
-/// </remarks>
 public class MyTaskCompletionSample : ITutorialSample
 {
+    /// <summary>
+    /// State structure to send to the instance method for work items queued on the thread pool
+    /// </summary>
+    readonly record struct ThreadPoolState(string Identifier, AsyncLocal<int> Mod);
+
     /// <summary>
     /// Custom class representing when a task is completed on the thread pool
     /// </summary>
@@ -36,7 +77,7 @@ public class MyTaskCompletionSample : ITutorialSample
         /// <summary>
         /// The wait event that Wait method will wait on for the completion of the event.
         /// </summary>
-        private readonly ManualResetEventSlim _waitEvent = new();
+        private readonly ManualResetEventSlim _waitEvent = new(false);
 
 
         /// <summary>
@@ -107,9 +148,7 @@ public class MyTaskCompletionSample : ITutorialSample
         }
     }
 
-
     // We remove the _actionCount and _resetEvent because now we can track them with our Task objects well enough.
-
 
     /// <summary>
     /// The instance method to run as actions in the thread pool. This is a synchronous method.
@@ -130,15 +169,17 @@ public class MyTaskCompletionSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstEnd; i++)
+            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            for (int i = secondStart; i <= secondEnd; i++)
+            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
             Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
@@ -153,7 +194,6 @@ public class MyTaskCompletionSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Runs sample code for the sample.
     /// </summary>
@@ -167,12 +207,15 @@ public class MyTaskCompletionSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // Create a task to send to the instance method to track the completion of the work and add it to the list
             MyTaskCompletion taskCompletion = new();
-            ThreadPool.QueueUserWorkItem(_ => InstanceMethod(
-                action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value,
-                taskCompletion));
+            ThreadPool.QueueUserWorkItem<ThreadPoolState>(state =>
+                InstanceMethod(state.Identifier,
+                    1 + state.Mod.Value, 5 + state.Mod.Value,
+                    1001 + state.Mod.Value, 1005 + state.Mod.Value,
+                    taskCompletion),
+                new(identifier, mod), true);
             tasks.Add(taskCompletion);
         }
 

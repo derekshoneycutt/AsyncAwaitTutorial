@@ -1,13 +1,37 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 20 : Standard Cancellation Token and Source
+ * 
+ *  Here we just replace our custom cancellation token with
+ *  the real, standard thing, and show how it might change our
+ *  code a little bit in some spots.
+ *  
+ *  A.  Copy Step 19. We will update this code.
+ *  
+ *  B.  Remove the definition of the custom cancellation token
+ *      and source. Update all references to use the standard
+ *      token instead.
+ *      
+ *  C.  Review existing async calls and add the cancellation
+ *      tokens to the calls that don't already have one yet.
+ *      If we want, we can use the constructor with a timeout
+ *      in the standard cancellation token source as well.
+ *      
+ *      
+ * There are some new places we can start using cancellation token
+ * now that we're using the standard thing and passing it
+ * everywhere. Additionally, we can remove some of the polls
+ * for its canceled state, instead just letting the leaf methods
+ * that we call poll it.
+ * 
+ * =====================================================
+*/
 
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates how to utilize CancellationToken to control asynchronous methods.
 /// </summary>
-/// <remarks>
-/// This is basically as simple as removing our custom cancellation token classes and using the standard one instead.
-/// This also enables us to pass it down to some methods that already accept it!
-/// </remarks>
 public class CancellationTokenSample : ITutorialSample
 {
     /// <summary>
@@ -31,17 +55,19 @@ public class CancellationTokenSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstEnd; i++)
+            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            for (int i = secondStart; i <= secondEnd; i++)
+            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -59,7 +85,6 @@ public class CancellationTokenSample : ITutorialSample
             completionSource.SetException(ex);
         }
     }
-
 
     /// <summary>
     /// Loops over 2 ranges of integers subsequently as an asynchronous operation
@@ -80,20 +105,21 @@ public class CancellationTokenSample : ITutorialSample
         // Send the cancellation token to the delays and remove any other polls on the token in this method--they're now superfluous
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
         Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -124,14 +150,20 @@ public class CancellationTokenSample : ITutorialSample
             string action = $"Action {i}";
             // Add the cancellation token to the parameters
             tasks.Add(
-                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value, cts.Token));
+                InstanceMethod(action,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value,
+                    cts.Token));
         }
 
         //We can pass the cancellation token down now that we know what to do!
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, linked.Token)));
+            ThreadMethod("Single Thread",
+                1, 5,
+                101, 105,
+                backThreadSource, linked.Token)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 

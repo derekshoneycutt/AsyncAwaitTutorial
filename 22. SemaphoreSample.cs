@@ -1,16 +1,77 @@
-﻿using System.Threading;
+﻿/*
+ * =====================================================
+ *         Step 22 : Semaphores
+ * 
+ *  Coordinating concurrent operations is an often difficult task
+ *  for many developers, and coordinating asynchronous operations
+ *  often presents with similar concerns. Unfortunately, we also
+ *  run into limitations of async code that many Wait operations
+ *  on standard concurrency structures block the thread they are
+ *  called on. This makes them contraindicated in async code,
+ *  because we want to avoid blocking any threads on the thread pool.
+ *  Nonetheless, Semaphores work great with async, allowing us
+ *  to continue writing locking code without concerns.
+ *  The point of this sample is to demonstrate a couple of potential
+ *  uses of semaphore in coordinating async operations.
+ *  
+ *  A.  Copy Step 20. We will update this code.
+ *  
+ *  B.  First, create a OnNewValueAsync method that will be
+ *      called each time we want to print a value to the screen.
+ *      We will take a string identifier, int value,
+ *      SemaphoreSlim synchronize, and cancellationToken.
+ *      In this, we want to take our ordinary print value
+ *      Console.WriteLine line and split it into 2 code lines.
+ *      The first will call Console.Write and be followed by
+ *      a Task.Yield that gives up the current thread for
+ *      use on the thread pool. The second line will finish
+ *      the started text with Console.WriteLine.
+ *      Wrap these in a WaitAsync and Release on the passed
+ *      synchronize SemaphoreSlim.
+ *      
+ *  C.  Update the existing InstanceMethod to call the new
+ *      OnNewValueAsync. We will need to make a SemaphoreSlim
+ *      in the Run method, with an initialCount of 1, and pass
+ *      it in here to then pass down to the OnNewValueAsync.
+ *      Because we are not wrapping literally every
+ *      Console.Write/Line call in this semaphore, we may be
+ *      able to note some race conditions occurring
+ *      sometimes when we execute, specifically with the additional
+ *      background thread. However, this semaphore protects
+ *      the two lines we wrapped so that at least this one printing
+ *      is never running over each other in a race condition.
+ *       
+ *  D.  In Run, create a list of SemaphoreSlim objects, the
+ *      first being the synchronize Semaphore added.
+ *      In each iteration that we call our instance method,
+ *      create a new SemaphoreSlim, secondLoopSignal, with initialCount 0,
+ *      and we add it to the list of Semaphores. At the end of Run,
+ *      we need to Dispose this list of semaphores.
+ *      
+ *  E.  Now, we want to split InstanceMethod into 2 methods.
+ *      One will be the first loop and will Release secondLoopSignal
+ *      when it is complete. The other will be the second loop
+ *      and will WaitAsync on secondLoopSignal until the first
+ *      loop releases. We need to then replace our original
+ *      single call with 2 calls to these 2 methods.
+ *      
+ *      
+ * At the end of this, we have successfully decoupled our two
+ * loops into two separate methods, and we ensured that we have
+ * some imperfect protections against race conditions when we're
+ * printing values to the screen in each loop.
+ * This is quite a bit of work, but we can see multiple asynchronous
+ * methods interacting with each other now and coordinating
+ * with async compatible locking and signaling.
+ * 
+ * =====================================================
+*/
 
 namespace AsyncAwaitTutorial;
-
 
 /// <summary>
 /// Sample demonstrating the use of semaphores with asynchronous code.
 /// </summary>
-/// <remarks>
-/// We take the code from Sample 20 -- Cancellation Tokens Sample -- and refactor the asynchronous method into 2 separate asynchronous methods.
-/// In order to coordinate them, we use a SemaphoreSlim to signal when the second loop should start iterating, and another SemaphoreSlim
-/// to ensure that only one of the asynchronous instances is writing at a single time.
-/// </remarks>
 public class SemaphoreSample : ITutorialSample
 {
     /// <summary>
@@ -33,17 +94,19 @@ public class SemaphoreSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            for (int i = firstStart; i <= firstEnd; i++)
+            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            for (int i = secondStart; i <= secondEnd; i++)
+            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            for (int value = start; value <= end; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -61,7 +124,6 @@ public class SemaphoreSample : ITutorialSample
         }
     }
 
-
     // We copy InstanceMethod into 2 and modify them some one does only the first loop and the other does only the second loop
 
     /// <summary>
@@ -71,7 +133,7 @@ public class SemaphoreSample : ITutorialSample
     /// <param name="value">The value to print.</param>
     /// <param name="synchronize">The semaphore used to synchronize console output.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    private static async Task OnNewValue(
+    private static async Task OnNewValueAsync(
         string identifier,
         int value,
         SemaphoreSlim synchronize,
@@ -94,7 +156,6 @@ public class SemaphoreSample : ITutorialSample
         }
     }
 
-
     /// <summary>
     /// Loops over the first of integers subsequently as an asynchronous operation
     /// </summary>
@@ -114,12 +175,13 @@ public class SemaphoreSample : ITutorialSample
     {
         Console.WriteLine($"Writing first values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
 
             // Inside, we wait with the synchronization semaphore and then release it so no other task tries to write at the same time as us
-            await OnNewValue(identifier, i, synchronize, cancellationToken).ConfigureAwait(false);
+            await OnNewValueAsync(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
         }
 
         // When the first loop is done, we signal to run the second with the second loop signal semaphore.
@@ -150,17 +212,17 @@ public class SemaphoreSample : ITutorialSample
         // For the second loop, we just hang out and wait until the second loop signal semaphore is released
         await secondLoopSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-        for (int i = secondStart; i <= secondEnd; i++)
+        (int start, int end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
 
             // Same modification inside as the first loop
-            await OnNewValue(identifier, i, synchronize, cancellationToken).ConfigureAwait(false);
+            await OnNewValueAsync(identifier, value, synchronize, cancellationToken).ConfigureAwait(false);
         }
 
         Console.WriteLine($"Fin second {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -181,22 +243,29 @@ public class SemaphoreSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // Create a semaphore that must be Released at least once; this is the signal to run the second loop
             SemaphoreSlim secondLoopSignal = new(0);
             semaphores.Add(secondLoopSignal);
             // We call both first loop and second loop together;
             // second loop will sit on the queue waiting for the second loop signal to trigger it to start
             tasks.Add(
-                FirstLoop(action, 1 + mod.Value, 5 + mod.Value, secondLoopSignal, synchronize, cancellationToken));
+                FirstLoop(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    secondLoopSignal, synchronize, cancellationToken));
             tasks.Add(
-                SecondLoop(action, 10001 + mod.Value, 10005 + mod.Value, secondLoopSignal, synchronize, cancellationToken));
+                SecondLoop(identifier,
+                    1001 + mod.Value, 1005 + mod.Value,
+                    secondLoopSignal, synchronize, cancellationToken));
         }
 
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            ThreadMethod("Single Thread", 1, 5, 101, 105, backThreadSource, cancellationToken)));
+            ThreadMethod("Single Thread",
+                1, 5,
+                101, 105,
+                backThreadSource, cancellationToken)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 

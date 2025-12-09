@@ -1,13 +1,44 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 21 : IAsyncDisposable
+ * 
+ *  Now we take another small tangent to discuss IAsyncDisposable.
+ *  We'll just create a fresh sample without copying prior code,
+ *  and start with IDisposable, then add IAsyncDisposable on to it.
+ *  
+ *  A.  Starting fresh, create a simple MyDisposable class.
+ *      For the first step, implement IDisposable with the
+ *      disposable pattern. VS will do most of the work here for us.
+ *      
+ *  B.  Setup Run so that it will construct 2 of our disposables:
+ *      The first will be a top-level using,
+ *      the second a parenthesized using with a scoped code block.
+ *      This shows the two different ways that disposables
+ *      are handled with using. We also can just call Dispose directly.
+ *      
+ *  C.  Add IAsyncDisposable to the MyDisposable class and try to
+ *      follow a similar disposable pattern, but with async
+ *      code instead. We can call the original internal Dispose
+ *      pattern with a false parameter after the async code
+ *      to ensure some necessarily synchronous cleanup is shared.
+ *      
+ *  D.  Change the using statements in Run to await using.
+ *      We see nothing has really changed, but it will now call
+ *      DisposeAsync instead of Dispose.
+ *      
+ *      
+ * Async disposables are an important and powerful tool for
+ * managing asynchronous resources, allowing us to free
+ * them as asynchronously as we are using them.
+ * 
+ * =====================================================
+*/
 
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// Sample containing a demonstration of the IAsyncDisposable interface for disposing resource asynchronously
 /// </summary>
-/// <remarks>
-/// This one is a complete tangent with completely unrelated code. However, it is an important and useful
-/// tool for an async programmer's toolbox, and we we demonstrate it here.
-/// </remarks>
 public class IAsyncDisposableSample : ITutorialSample
 {
     /// <summary>
@@ -88,11 +119,11 @@ public class IAsyncDisposableSample : ITutorialSample
         Console.WriteLine();
 
         // This one will dispose at the very end of the method
-        await using var majorDisposable = new MyDisposable("Disposable Major").ConfigureAwait(false);
+        await using var _ = new MyDisposable("Disposable Major").ConfigureAwait(false);
 
 
         // This one will dispose at the end of the code block that immediately follows.
-        await using (var minorDisposable = new MyDisposable("Disposable Minor").ConfigureAwait(false))
+        await using (new MyDisposable("Disposable Minor").ConfigureAwait(false))
         {
             Console.WriteLine("Writing before dispose.");
         }

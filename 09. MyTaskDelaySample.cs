@@ -1,20 +1,50 @@
-﻿using System.Runtime.ExceptionServices;
+﻿/*
+ * =====================================================
+ *         Step 9 : Implement Task.Delay
+ * 
+ *  Here, we want to show how a good implementation of
+ *  Task.Delay might be done, as opposed to continuing with Thread.Sleep.
+ *  
+ *  
+ *  A.  Copy Step 8. We will reuse all of this.
+ *      
+ *  B.  Implement Task.Delay and replace our original Thread.Sleep
+ *      calls in the InstanceMethod method with a call to it instead.
+ *      
+ * This is a pretty simple step as well, but starts us
+ * in the direction of real asynchrony.
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
-
-
 
 /// <summary>
 /// This sample demonstrates creating a custom implementation of Task.Delay with the previous custom tasks.
 /// </summary>
 public class MyTaskDelaySample : ITutorialSample
 {
-
     /// <summary>
     /// The custom task class to represent work being done in the thread pool
     /// </summary>
     public class MyTask
     {
+        /// <summary>
+        /// Structure to store the continuation information currently requested for the task
+        /// </summary>
+        private readonly record struct RunContinuation(
+            Action? Continuation,
+            ExecutionContext? ExecutionContext);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning a task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunTask(
+            Action Action,
+            MyTask Task);
+
         /// <summary>
         /// The lock object used to synchronize between several threads
         /// </summary>
@@ -33,12 +63,7 @@ public class MyTaskDelaySample : ITutorialSample
         /// <summary>
         /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
         /// </summary>
-        private Action? _continuation = null;
-
-        /// <summary>
-        /// The execution context that the task information should be run under
-        /// </summary>
-        private ExecutionContext? _executionContext = null;
+        private RunContinuation _continuation = new(null, null);
 
         /// <summary>
         /// Gets a value indicating whether this task has completed operations.
@@ -60,27 +85,31 @@ public class MyTaskDelaySample : ITutorialSample
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
         /// </summary>
-        /// <param name="action">The action to execute.</param>
-        /// <param name="executionContext">The execution context to execute on.</param>
-        private static void Execute(
-            Action action,
-            ExecutionContext? executionContext = null)
+        /// <param name="continuation">The continuation data containing the action and the execution context to execute</param>
+        private static void Execute(RunContinuation continuation)
         {
-            if (executionContext is null)
+            if (continuation.Continuation is null)
             {
-                action();
+                return;
             }
-            else
+
+            ThreadPool.QueueUserWorkItem<RunContinuation>(continuation =>
             {
-                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
-            }
+                if (continuation.ExecutionContext is null)
+                {
+                    continuation.Continuation!();
+                }
+                else
+                {
+                    ExecutionContext.Run(continuation.ExecutionContext, act => ((Action)act!).Invoke(), continuation.Continuation);
+                }
+            }, continuation, true);
         }
 
         /// <summary>
         /// Marks the task as complete, with or without an exception
         /// </summary>
         /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
-        /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
         private void Complete(Exception? ex)
         {
             lock (_synchronize)
@@ -93,10 +122,7 @@ public class MyTaskDelaySample : ITutorialSample
                 _completed = true;
                 _exception = ex;
 
-                if (_continuation is not null)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
-                }
+                Execute(_continuation);
             }
         }
 
@@ -116,7 +142,6 @@ public class MyTaskDelaySample : ITutorialSample
             Complete(ex);
         }
 
-
         /// <summary>
         /// Sets the continuation for the task without any semaphore protection.
         /// </summary>
@@ -126,14 +151,14 @@ public class MyTaskDelaySample : ITutorialSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
+            RunContinuation continuation = new(action, ExecutionContext.Capture());
             if (_completed)
             {
-                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
+                Execute(continuation);
             }
             else
             {
-                _continuation = action;
-                _executionContext = ExecutionContext.Capture();
+                _continuation = continuation;
             }
         }
 
@@ -161,7 +186,6 @@ public class MyTaskDelaySample : ITutorialSample
             }
         }
 
-
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
@@ -173,8 +197,7 @@ public class MyTaskDelaySample : ITutorialSample
                 SetContinuationUnprotected(action);
             }
         }
-
-
+        
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
         /// </summary>
@@ -182,26 +205,25 @@ public class MyTaskDelaySample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunTask>(task =>
             {
                 try
                 {
-                    action();
+                    task.Action();
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
+                    task.Task.SetException(ex);
                     return;
                 }
 
-                returnTask.SetResult();
-            });
+                task.Task.SetResult();
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Wait until all of the provided tasks have completed, as an asynchronous operation
@@ -210,12 +232,12 @@ public class MyTaskDelaySample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             List<MyTask> useTasks = [.. tasks];
             if (useTasks.Count < 1)
             {
-                returnTask.SetResult();
+                task.SetResult();
             }
             else
             {
@@ -225,19 +247,18 @@ public class MyTaskDelaySample : ITutorialSample
                 {
                     if (Interlocked.Decrement(ref remaining) < 1)
                     {
-                        returnTask.SetResult();
+                        task.SetResult();
                     }
                 }
 
-                foreach (MyTask task in useTasks)
+                foreach (MyTask useTask in useTasks)
                 {
-                    task.ContinueWith(Continuation);
+                    useTask.ContinueWith(Continuation);
                 }
             }
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Delays for a specified timeout period as an asynchronous operation.
@@ -251,8 +272,6 @@ public class MyTaskDelaySample : ITutorialSample
             return task;
         }
     }
-
-
 
     /// <summary>
     /// The instance method to run as tasks.
@@ -269,20 +288,21 @@ public class MyTaskDelaySample : ITutorialSample
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
         // Update the loops to call the custom Delay instead of Thread.Sleep
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             MyTask.Delay(1000).Wait();
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             MyTask.Delay(1000).Wait();
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
         Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -296,9 +316,11 @@ public class MyTaskDelaySample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             tasks.Add(MyTask.Run(() =>
-                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value)));
+                InstanceMethod(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value)));
         }
 
         MyTask.WhenAll(tasks).Wait();

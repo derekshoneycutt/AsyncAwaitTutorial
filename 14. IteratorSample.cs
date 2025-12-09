@@ -1,6 +1,28 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 14 : Making an iterator with yield return
+ * 
+ *  Now we show how to write an iterator method using
+ *  yield return, which the compiler translates into
+ *  all the state machine stuff for us.
+ *  
+ *  
+ *  A.  Copy Step 13. We will update this code.
+ *  
+ *  B.  Write a new method DoubleLoop that returns
+ *      IEnumerable<int> and has 2 loops, inside each
+ *      a Sleep and then yield return value.
+ *  
+ *  C.  Remove the manual IEnumerable classes and update
+ *      InstanceMethod to call the new method instead.
+ *      
+ * This is a pretty simple step, but really brings home
+ * the strength of some of these language features.
+ * 
+ * =====================================================
+*/
 
-
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates an IEnumerable iterator running over 2 loops
@@ -21,12 +43,14 @@ public class IteratorSample : ITutorialSample
     public static IEnumerable<int> DoubleLoop(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
-        for (int value = firstStart; value <= firstEnd; ++value)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(500);
             yield return value;
         }
-        for (int value = secondStart; value <= secondEnd; ++value)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(500);
             yield return value;
@@ -37,21 +61,16 @@ public class IteratorSample : ITutorialSample
     /// The instance method to run as independent examples in the sample. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first start value.</param>
-    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
-    /// <param name="secondStart">The second start value.</param>
-    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="values">The collection of values to print</param>
     public static void InstanceMethod(
         string identifier,
-        int firstStart, int firstEnd, int secondStart, int secondEnd)
+        IEnumerable<int> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        IEnumerable<int> myState = DoubleLoop(1, 5, 101, 105);
+        //List<int> listed = [.. values]; // Note the long delay that is the multiple Thread.Sleep occurring in this call!
 
-        //List<int> listed = [.. myState]; // Note the long delay that is the multiple Thread.Sleep occurring in this call!
-
-        foreach (int value in myState)
+        foreach (int value in values)
         {
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
@@ -69,8 +88,12 @@ public class IteratorSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             int mod = 10 * i;
-            string action = $"Action {i}";
-            InstanceMethod(action, 1 + mod, 5 + mod, 1001 + mod, 1005 + mod);
+            string identifier = $"Action {i}";
+            // Call the iterator here
+            IEnumerable<int> values = DoubleLoop(
+                1 + mod, 5 + mod,
+                1001 + mod, 1005 + mod);
+            InstanceMethod(identifier, values);
         }
 
         Console.WriteLine("All fin");

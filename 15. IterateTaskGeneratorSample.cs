@@ -1,9 +1,37 @@
-﻿using System.Runtime.ExceptionServices;
+﻿/*
+ * =====================================================
+ *         Step 15 : Hacking iterators for async code
+ * 
+ *  async/await and IEnumerable iterators share vast
+ *  amounts of code at the compiler level, so we will
+ *  utilize the iterators with yield return and our own
+ *  MyTask from previous samples to simulate async/await
+ *  type programming for the first time.
+ *  
+ *  
+ *  A.  Copy Step 10. We will update this code.
+ *      Comment or remove the InstanceMethod from there
+ *      and instead copy over the InstanceMethod from
+ *      step 9. We can use this more effectively.
+ *  
+ *  B.  Update the InstanceMethod to return IEnumerable<MyTask>
+ *      and change the .Wait() calls to instead yield return
+ *      the MyTask object.
+ *      
+ *  C.  Create the Iterate method and modify Run to use it
+ *      and the new InstanceMethod.
+ *      
+ *      
+ * This is a pretty simple step after everything we
+ * have done to get here, but we now have something almost
+ * identical to async/await with our own custom task!
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
-
-
-
 
 /// <summary>
 /// This sample demonstrates using IEnumerable iterator to simulate async/await style
@@ -16,7 +44,6 @@ namespace AsyncAwaitTutorial;
 /// </remarks>
 public class IterateTaskGeneratorSample : ITutorialSample
 {
-
     /// <summary>
     /// The custom task class to represent work being done in the thread pool
     /// </summary>
@@ -35,6 +62,26 @@ public class IterateTaskGeneratorSample : ITutorialSample
             }
         }
 
+        /// <summary>
+        /// Structure to store the continuation information currently requested for the task
+        /// </summary>
+        private readonly record struct RunContinuation(
+            Action? Continuation,
+            ExecutionContext? ExecutionContext);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning a task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunTask(
+            Action Action,
+            MyTask Task);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning an async task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunAsyncTask(
+            Func<MyTask> Action,
+            MyTask Task);
 
         /// <summary>
         /// The lock object used to synchronize between several threads
@@ -54,12 +101,7 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <summary>
         /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
         /// </summary>
-        private Action? _continuation = null;
-
-        /// <summary>
-        /// The execution context that the task information should be run under
-        /// </summary>
-        private ExecutionContext? _executionContext = null;
+        private RunContinuation _continuation = new(null, null);
 
         /// <summary>
         /// Gets a value indicating whether this task has completed operations.
@@ -81,20 +123,25 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
         /// </summary>
-        /// <param name="action">The action to execute.</param>
-        /// <param name="executionContext">The execution context to execute on.</param>
-        private static void Execute(
-            Action action,
-            ExecutionContext? executionContext = null)
+        /// <param name="continuation">The continuation data containing the action and the execution context to execute</param>
+        private static void Execute(RunContinuation continuation)
         {
-            if (executionContext is null)
+            if (continuation.Continuation is null)
             {
-                action();
+                return;
             }
-            else
+
+            ThreadPool.QueueUserWorkItem<RunContinuation>(continuation =>
             {
-                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
-            }
+                if (continuation.ExecutionContext is null)
+                {
+                    continuation.Continuation!();
+                }
+                else
+                {
+                    ExecutionContext.Run(continuation.ExecutionContext, act => ((Action)act!).Invoke(), continuation.Continuation);
+                }
+            }, continuation, true);
         }
 
         /// <summary>
@@ -114,10 +161,7 @@ public class IterateTaskGeneratorSample : ITutorialSample
                 _completed = true;
                 _exception = ex;
 
-                if (_continuation is not null)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
-                }
+                Execute(_continuation);
             }
         }
 
@@ -137,7 +181,6 @@ public class IterateTaskGeneratorSample : ITutorialSample
             Complete(ex);
         }
 
-
         /// <summary>
         /// Sets the continuation for the task without any semaphore protection.
         /// </summary>
@@ -147,14 +190,14 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
+            RunContinuation continuation = new(action, ExecutionContext.Capture());
             if (_completed)
             {
-                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
+                Execute(continuation);
             }
             else
             {
-                _continuation = action;
-                _executionContext = ExecutionContext.Capture();
+                _continuation = continuation;
             }
         }
 
@@ -182,14 +225,13 @@ public class IterateTaskGeneratorSample : ITutorialSample
             }
         }
 
-
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
         /// <param name="action">The action to perform once the initial task has completed.</param>
         public MyTask ContinueWith(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             lock (_synchronize)
             {
@@ -197,14 +239,12 @@ public class IterateTaskGeneratorSample : ITutorialSample
                 {
                     action();
 
-                    returnTask.SetResult();
+                    task.SetResult();
                 });
             }
 
-            return returnTask;
+            return task;
         }
-
-
 
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
@@ -214,31 +254,29 @@ public class IterateTaskGeneratorSample : ITutorialSample
 
         public MyTask ContinueWith(Func<MyTask> action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             lock (_synchronize)
             {
                 SetContinuationUnprotected(() =>
                 {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
+                    MyTask next = action();
+                    next.ContinueWith(() =>
                     {
-                        if (followTask._exception is not null)
+                        if (next._exception is not null)
                         {
-                            returnTask.SetException(followTask._exception);
+                            task.SetException(next._exception);
                         }
                         else
                         {
-                            returnTask.SetResult();
+                            task.SetResult();
                         }
                     });
                 });
             }
 
-            return returnTask;
+            return task;
         }
-
-
 
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
@@ -247,26 +285,25 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunTask>(task =>
             {
                 try
                 {
-                    action();
+                    task.Action();
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
+                    task.Task.SetException(ex);
                     return;
                 }
 
-                returnTask.SetResult();
-            });
+                task.Task.SetResult();
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
@@ -275,37 +312,33 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Func<MyTask> action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunAsyncTask>(task =>
             {
                 try
                 {
-                    MyTask followTask = action();
-                    followTask.ContinueWith(() =>
+                    MyTask next = task.Action();
+                    next.ContinueWith(() =>
                     {
-                        if (followTask._exception is not null)
+                        if (next._exception is not null)
                         {
-                            returnTask.SetException(followTask._exception);
+                            task.Task.SetException(next._exception);
                         }
                         else
                         {
-                            returnTask.SetResult();
+                            task.Task.SetResult();
                         }
                     });
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
-                    return;
+                    task.Task.SetException(ex);
                 }
-            });
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
-
-
-
 
         /// <summary>
         /// Wait until all of the provided tasks have completed, as an asynchronous operation
@@ -314,12 +347,12 @@ public class IterateTaskGeneratorSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask WhenAll(params IEnumerable<MyTask> tasks)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
             List<MyTask> useTasks = [.. tasks];
             if (useTasks.Count < 1)
             {
-                returnTask.SetResult();
+                task.SetResult();
             }
             else
             {
@@ -329,19 +362,18 @@ public class IterateTaskGeneratorSample : ITutorialSample
                 {
                     if (Interlocked.Decrement(ref remaining) < 1)
                     {
-                        returnTask.SetResult();
+                        task.SetResult();
                     }
                 }
 
-                foreach (MyTask task in useTasks)
+                foreach (MyTask useTask in useTasks)
                 {
-                    task.ContinueWith(Continuation);
+                    useTask.ContinueWith(Continuation);
                 }
             }
 
-            return returnTask;
+            return task;
         }
-
 
         /// <summary>
         /// Delays for a specified timeout period as an asynchronous operation.
@@ -356,8 +388,6 @@ public class IterateTaskGeneratorSample : ITutorialSample
         }
     }
 
-
-
     /// <summary>
     /// Helper method that will iterate over a collection of tasks and run them subsequently, as an asynchronous operation.
     /// </summary>
@@ -365,7 +395,7 @@ public class IterateTaskGeneratorSample : ITutorialSample
     /// <returns>A Task that represents the asynchronous operation</returns>
     public static MyTask Iterate(IEnumerable<MyTask> tasks)
     {
-        MyTask returnTask = new();
+        MyTask task = new();
 
         IEnumerator<MyTask> enumerator = tasks.GetEnumerator();
 
@@ -375,26 +405,23 @@ public class IterateTaskGeneratorSample : ITutorialSample
             {
                 if (enumerator.MoveNext())
                 {
-                    MyTask task = enumerator.Current;
-                    task.ContinueWith(MoveNext);
+                    enumerator.Current.ContinueWith(MoveNext);
                     return;
                 }
             }
             catch (Exception ex)
             {
-                returnTask.SetException(ex);
+                task.SetException(ex);
                 return;
             }
 
-
-            returnTask.SetResult();
+            task.SetResult();
         }
 
         MoveNext();
 
-        return returnTask;
+        return task;
     }
-
 
     /// <summary>
     /// Returns an iterator that loops over 2 ranges of integers subsequently.
@@ -412,20 +439,21 @@ public class IterateTaskGeneratorSample : ITutorialSample
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
         // We return IEnumerable<MyTask> instead of void and do a yield return on the MyTask.Delay instead of Wait.
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             yield return MyTask.Delay(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             yield return MyTask.Delay(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -439,10 +467,12 @@ public class IterateTaskGeneratorSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // Now we call Iterate on the IEnumerable InstanceMethod returns; unfortunately back to an intermediary and not directly adding return from InstanceMethod
             tasks.Add(Iterate(
-                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value)));
+                InstanceMethod(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value)));
         }
 
         MyTask.WhenAll(tasks).Wait();

@@ -1,12 +1,37 @@
-﻿namespace AsyncAwaitTutorial;
+﻿/*
+ * =====================================================
+ *         Step 2 : Thread Sample
+ * 
+ *  This launches 4 threads, each of which is the
+ *  InstanceMethod with different values.
+ *  The threads run through 2 loops, printing each
+ *  number in the specified ranges.
+ *  
+ *  
+ *  A.  Copy Step 1. We will reuse all of this.
+ *      
+ *  B.  Create a list of threads in Run to store all the threads
+ *      We will need to Join these in order to make sure that
+ *      we don't exit before they're done.
+ *      
+ *  C.  Instead of just calling the InstanceMethod, we modify
+ *      to start a Thread. We add this Thread to our list.
+ *      
+ *  D.  Finally, we need to loop through all those Threads
+ *      and join them to the execution thread.
+ *      
+ * This is just the first step to show we can do
+ * concurrency and make sure we have a basic idea of what
+ * is going on under the hood. We'll also manage
+ * a thread a lot in the future this way.
+ * 
+ * =====================================================
+*/
 
+namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates launching threads within C#. That's all
-/// <para>
-/// This launches 4 threads, each of which is the InstanceMethod with different values.
-/// The threads run through 2 loops, printing each number in the specified ranges.
-/// </para>
 /// </summary>
 public class ThreadSample : ITutorialSample
 {
@@ -24,18 +49,20 @@ public class ThreadSample : ITutorialSample
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(500);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(500);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
     /// <summary>
@@ -49,9 +76,12 @@ public class ThreadSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             int mod = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i + 1}";
             // Create and start a thread, adding it to the collection
-            Thread thread = new(new ThreadStart(() => InstanceMethod(action, 1 + mod, 5 + mod, 1001 + mod, 1005 + mod)));
+            Thread thread = new(new ThreadStart(() =>
+                InstanceMethod(identifier,
+                    1 + mod, 5 + mod,
+                    1001 + mod, 1005 + mod)));
             thread.Start();
             threads.Add(thread);
         }

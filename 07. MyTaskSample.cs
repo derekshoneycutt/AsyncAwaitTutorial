@@ -1,7 +1,48 @@
-﻿using System.Runtime.ExceptionServices;
+﻿/*
+ * =====================================================
+ *         Step 7 : Extend custom Task structure
+ * 
+ *  The major goal with this one is introduce a Task.Run
+ *  equivalent and the concept of ContinueWith, initially
+ *  by replacing the initial Wait implementation with one
+ *  based on ContinueWith instead.
+ *  
+ *  
+ *  A.  Copy Step 6. We will reuse all of this.
+ *      
+ *  B.  Rename the MyTaskCompletion to MyTask and add the
+ *      Task.Run equivalent implementation, including creating
+ *      the state structure to pass into the thread pool.
+ *      
+ *  C.  Update Run and InstanceMethod to use the new MyTask.Run method.
+ *      This is mostly removing code that MyTask.Run will now cover
+ *      for us.
+ *      We can remove the temporary ThreadPoolState with this complete.
+ *      
+ *  D.  Create the ContinueWith implementation. This
+ *      requires a new structure with 2 new properties:
+ *      continuation and execution context.
+ *      We take the Execute from the thread pool and use a similar
+ *      method to execute the ContinueWith methods on the thread pool.
+ *      
+ *  E.  Refactor Wait to use the continuation and a local
+ *      reset event instead.
+ *      
+ * This prepares us with the normal Task patterns we see throughout
+ * async code in C#, and internally Wait gives us a good first example
+ * of using the ContinueWith to continue async operations.
+ * 
+ * Of course, we are not trying to literally re-create the actual
+ * Task class, so we take whatever liberties we want with the
+ * style. This is just a demonstration, so we can have some fun
+ * with records and stuff if we want.
+ * 
+ * =====================================================
+*/
+
+using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
-
 
 /// <summary>
 /// This sample demonstrates making a custom Task class using the standard ThreadPool class.
@@ -12,11 +53,27 @@ namespace AsyncAwaitTutorial;
 /// </remarks>
 public class MyTaskSample : ITutorialSample
 {
+    // We don't need the old ThreadPoolState any more
+
     /// <summary>
     /// The custom task class to represent work being done in the thread pool
     /// </summary>
     public class MyTask
     {
+        /// <summary>
+        /// Structure to store the continuation information currently requested for the task
+        /// </summary>
+        private readonly record struct RunContinuation(
+            Action? Continuation,
+            ExecutionContext? ExecutionContext);
+
+        /// <summary>
+        /// State structure to send to the thread pool concerning a task to run; includes the action and the tracking task structure
+        /// </summary>
+        private readonly record struct RunTask(
+            Action Action,
+            MyTask Task);
+
         /// <summary>
         /// The lock object used to synchronize between several threads
         /// </summary>
@@ -37,12 +94,7 @@ public class MyTaskSample : ITutorialSample
         /// <summary>
         /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
         /// </summary>
-        private Action? _continuation = null;
-
-        /// <summary>
-        /// The execution context that the task information should be run under
-        /// </summary>
-        private ExecutionContext? _executionContext = null;
+        private RunContinuation _continuation = new(null, null);
 
         /// <summary>
         /// Gets a value indicating whether this task has completed operations.
@@ -66,20 +118,25 @@ public class MyTaskSample : ITutorialSample
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
         /// </summary>
-        /// <param name="action">The action to execute.</param>
-        /// <param name="executionContext">The execution context to execute on.</param>
-        private static void Execute(
-            Action action,
-            ExecutionContext? executionContext = null)
+        /// <param name="continuation">The continuation data containing the action and the execution context to execute</param>
+        private static void Execute(RunContinuation continuation)
         {
-            if (executionContext is null)
+            if (continuation.Continuation is null)
             {
-                action();
+                return;
             }
-            else
+
+            ThreadPool.QueueUserWorkItem<RunContinuation>(continuation =>
             {
-                ExecutionContext.Run(executionContext, act => ((Action)act!).Invoke(), action);
-            }
+                if (continuation.ExecutionContext is null)
+                {
+                    continuation.Continuation!();
+                }
+                else
+                {
+                    ExecutionContext.Run(continuation.ExecutionContext, act => ((Action)act!).Invoke(), continuation.Continuation);
+                }
+            }, continuation, true);
         }
 
         /// <summary>
@@ -99,10 +156,7 @@ public class MyTaskSample : ITutorialSample
                 _exception = ex;
 
                 // Run the continuation on the thread pool, no more wait event to set *here*
-                if (_continuation is not null)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => Execute(_continuation, _executionContext));
-                }
+                Execute(_continuation);
             }
         }
 
@@ -122,7 +176,6 @@ public class MyTaskSample : ITutorialSample
             Complete(ex);
         }
 
-
         /// <summary>
         /// Sets the continuation for the task without any semaphore protection.
         /// </summary>
@@ -132,14 +185,14 @@ public class MyTaskSample : ITutorialSample
         /// <param name="action">The action to queue into the thread pool.</param>
         private void SetContinuationUnprotected(Action action)
         {
+            RunContinuation continuation = new(action, ExecutionContext.Capture());
             if (_completed)
             {
-                ThreadPool.QueueUserWorkItem(_ => Execute(action, _executionContext));
+                Execute(continuation);
             }
             else
             {
-                _continuation = action;
-                _executionContext = ExecutionContext.Capture();
+                _continuation = continuation;
             }
         }
 
@@ -169,7 +222,6 @@ public class MyTaskSample : ITutorialSample
             }
         }
 
-
         /// <summary>
         /// Add a continuation action to the task that executes once the initial task has completed.
         /// </summary>
@@ -182,7 +234,6 @@ public class MyTaskSample : ITutorialSample
             }
         }
 
-
         /// <summary>
         /// Runs the specified action as a task on the thread pool.
         /// </summary>
@@ -190,29 +241,26 @@ public class MyTaskSample : ITutorialSample
         /// <returns>A Task that represents the asynchronous operation.</returns>
         public static MyTask Run(Action action)
         {
-            MyTask returnTask = new();
+            MyTask task = new();
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            ThreadPool.QueueUserWorkItem<RunTask>(task =>
             {
                 try
                 {
-                    action();
+                    task.Action();
                 }
                 catch (Exception ex)
                 {
-                    returnTask.SetException(ex);
+                    task.Task.SetException(ex);
                     return;
                 }
 
-                returnTask.SetResult();
-            });
+                task.Task.SetResult();
+            }, new(action, task), true);
 
-            return returnTask;
+            return task;
         }
     }
-
-
-
 
     /// <summary>
     /// The instance method to run as tasks.
@@ -227,23 +275,23 @@ public class MyTaskSample : ITutorialSample
         int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
         // Remove all the funny tracking we had to add before! We're back to just a normal looking method!
-
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        for (int i = firstStart; i <= firstEnd; i++)
+        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
-        for (int i = secondStart; i <= secondEnd; i++)
+        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+        for (int value = start; value <= end; ++value)
         {
             Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {i}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
         Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -257,10 +305,12 @@ public class MyTaskSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             mod.Value = 10 * i;
-            string action = $"Action {i}";
+            string identifier = $"Action {i}";
             // Now use MyTask.Run to run the simpler method and track it the same!
             tasks.Add(MyTask.Run(() =>
-                InstanceMethod(action, 1 + mod.Value, 5 + mod.Value, 10001 + mod.Value, 10005 + mod.Value)));
+                InstanceMethod(identifier,
+                    1 + mod.Value, 5 + mod.Value,
+                    1001 + mod.Value, 1005 + mod.Value)));
         }
 
         foreach (MyTask task in tasks)

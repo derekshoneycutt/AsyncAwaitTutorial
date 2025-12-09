@@ -1,14 +1,42 @@
-﻿using System.Collections;
+﻿/*
+ * =====================================================
+ *         Step 13 : Implementing the state machine as IEnumerable
+ * 
+ *  Taking from our state machine, we want to build it into the
+ *  IEnumerable iterators that we can use in C# for our
+ *  demonstration purposes.
+ *  
+ *  
+ *  A.  Copy Step 12. We will update this code.
+ *  
+ *  B.  Create initial IEnumerable class implementation.
+ *  
+ *  C.  Create the IEnumerator class implementation and link
+ *      it directly to the IEnumerable class's GetEnumerator
+ *      method with new. We can just move the MoveNext method
+ *      from our state machine directly into the Enumerator
+ *      MoveNext method, fixing references to use the local
+ *      values. It should be easy to implement everything.
+ *      
+ *  D.  Update Run and InstanceMethod to create one of these
+ *      new Enumerable objects and iterate on it with foreach.
+ *      You can move them into a class, etc. to see that
+ *      the delayed execution continues.
+ *      
+ * This is a pretty simple step, just transitioning to
+ * IEnumerable instead of an entirely manual state machine
+ * process.
+ * 
+ * =====================================================
+*/
+
+using System.Collections;
 
 namespace AsyncAwaitTutorial;
-
 
 /// <summary>
 /// This sample demonstrates creating a basic IEnumerable implementation from the ground up, with 2 inner loops.
 /// </summary>
-/// <remarks>
-/// This is basically just adopting our previous state machine into a formal IEnumerable structure.
-/// </remarks>
 public class IEnumerableSample : ITutorialSample
 {
     /// <summary>
@@ -38,19 +66,14 @@ public class IEnumerableSample : ITutorialSample
         private StatePosition _position = StatePosition.Initial;
 
         /// <summary>
-        /// The current value of the state that we are iterating over
+        /// Gets the element in the collection at the current position of the enumerator.
         /// </summary>
-        private int _currentValue = -1;
+        object IEnumerator.Current => Current;
 
         /// <summary>
         /// Gets the element in the collection at the current position of the enumerator.
         /// </summary>
-        object IEnumerator.Current => _currentValue;
-
-        /// <summary>
-        /// Gets the element in the collection at the current position of the enumerator.
-        /// </summary>
-        public int Current => _currentValue;
+        public int Current { get; private set; } = -1;
 
         /// <summary>
         /// Advances the enumerator to the next element of the collection.
@@ -67,23 +90,23 @@ public class IEnumerableSample : ITutorialSample
                 case StatePosition.Initial:
                     Thread.Sleep(500);
                     _position = StatePosition.FirstLoop;
-                    _currentValue = firstStart;
+                    Current = firstStart;
                     return true;
 
                 case StatePosition.FirstLoop:
                     Thread.Sleep(500);
-                    ++_currentValue;
-                    if (_currentValue > firstEnd)
+                    ++Current;
+                    if (Current > firstEnd)
                     {
-                        _currentValue = secondStart;
+                        Current = secondStart;
                         _position = StatePosition.SecondLoop;
                     }
                     return true;
 
                 case StatePosition.SecondLoop:
                     Thread.Sleep(500);
-                    ++_currentValue;
-                    if (_currentValue > secondEnd)
+                    ++Current;
+                    if (Current > secondEnd)
                     {
                         _position = StatePosition.End;
                         return false;
@@ -101,7 +124,7 @@ public class IEnumerableSample : ITutorialSample
         public void Reset()
         {
             _position = StatePosition.Initial;
-            _currentValue = 0;
+            Current = 0;
         }
 
         /// <summary>
@@ -130,7 +153,9 @@ public class IEnumerableSample : ITutorialSample
         /// </returns>
         public IEnumerator<int> GetEnumerator()
         {
-            return new MyEnumerator(firstStart, firstEnd, secondStart, secondEnd);
+            (int startFirst, int endFirst) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
+            (int startSecond, int endSecond) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
+            return new MyEnumerator(startFirst, endFirst, startSecond, endSecond);
         }
 
         /// <summary>
@@ -149,21 +174,16 @@ public class IEnumerableSample : ITutorialSample
     /// The instance method to run as independent examples in the sample. This is a synchronous method.
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first start value.</param>
-    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
-    /// <param name="secondStart">The second start value.</param>
-    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="values">The collection of values to print</param>
     public static void InstanceMethod(
         string identifier,
-        int firstStart, int firstEnd, int secondStart, int secondEnd)
+        IEnumerable<int> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        MyEnumerable myState = new(1, 5, 101, 105);
+        //List<int> listed = [.. values]; // Note the long delay that is the multiple Thread.Sleep occurring in this call!
 
-        //List<int> listed = [.. myState]; // Note the long delay that is the multiple Thread.Sleep occurring in this call!
-
-        foreach (int value in myState)
+        foreach (int value in values)
         {
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
@@ -183,8 +203,12 @@ public class IEnumerableSample : ITutorialSample
         for (int i = 0; i < actionCount; ++i)
         {
             int mod = 10 * i;
-            string action = $"Action {i}";
-            InstanceMethod(action, 1 + mod, 5 + mod, 1001 + mod, 1005 + mod);
+            string identifier = $"Action {i}";
+            // Create and pass the new state object here
+            MyEnumerable values = new(
+                1 + mod, 5 + mod,
+                1001 + mod, 1005 + mod);
+            InstanceMethod(identifier, values);
         }
 
         Console.WriteLine("All fin");
