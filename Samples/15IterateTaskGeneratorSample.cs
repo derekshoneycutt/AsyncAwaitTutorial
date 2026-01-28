@@ -1,43 +1,10 @@
-﻿/*
- * =====================================================
- *         Step 15 : Hacking iterators for async code
- * 
- *  async/await and IEnumerable iterators share vast
- *  amounts of code at the compiler level, so we will
- *  utilize the iterators with yield return and our own
- *  MyTask from previous samples to simulate async/await
- *  type programming for the first time.
- *  
- *      
- *  A.  Create the Iterate method and modify Run to use it
- *      and the new Consume. This can be modeled off of
- *      the chained Consume method.
- *      
- *  B.  Update the Consume to return IEnumerable<MyTask>
- *      and yield return every Task that we want to
- *      "await" on. This should start looking normal again.
- *      
- *      
- * This is a pretty simple step after everything we
- * have done to get here, but we now have something almost
- * identical to async/await with our own custom task!
- * 
- * =====================================================
-*/
-
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates using IEnumerable iterator to simulate async/await style
 /// </summary>
-/// <remarks>
-/// For this sample, we go back to step 9--Using Custom Task.Delay--and try out what happens
-/// if we pretend yield return is kind of like await in async/await. In reality, the code compiled between these two is remarkably similar.
-/// We have to add and use an Iterate method as well as refactoring it to use the yield return method.
-/// This isn't a great thing for production code, but it demonstrates a transitional phase to understand what is happening.
-/// </remarks>
 public class IterateTaskGeneratorSample : ITutorialSample
 {
     /// <summary>
@@ -425,6 +392,7 @@ public class IterateTaskGeneratorSample : ITutorialSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
+    /// <returns>A collection of Tasks that complete upon each iteration of the consumption loop.</returns>
     public static IEnumerable<MyTask> Consume(
         string identifier,
         IEnumerable<MyTask<int>> values)

@@ -1,27 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 5 : Move to the standard Thread Pool
- * 
- *  Here, we just remove the custom thread pool and start
- *  using the standard ThreadPool class. This is to get us
- *  comfortable with this behavior, as it is more advanced
- *  than what we did.
- *  
- *  
- *  A.  Delete all of the custom thread pool and use ThreadPool.
- *      QueueUserWorkItem call will need updated in this.
- *      
- *  B.  Create ThreadPoolState and demonstrate starting a
- *      work item on the ThreadPool with some state.
- *      
- * This is a pretty simple one, but we can spend some time
- * reviewing everything we've learned and see how it fits directly
- * with what we have available in the standard library.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates using the standard ThreadPool class. That's all
@@ -37,6 +14,7 @@ public class ThreadPoolSample : ITutorialSample
     /// The number of actions to launch on the thread pool
     /// </summary>
     private static int _actionCount = 0;
+
     /// <summary>
     /// The reset event used to signal that all actions have completed processing
     /// </summary>

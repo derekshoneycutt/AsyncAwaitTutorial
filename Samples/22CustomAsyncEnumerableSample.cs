@@ -1,42 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 24 : First IAsyncEnumerable
- * 
- *  The previous sample gave us some motivations for the
- *  IAsyncEnumerable, and so now we're actually going to make
- *  one and utilize it effectively. The Concat method we use
- *  for IAsyncEnumerable is new in .net10 (previously part of
- *  Reactive Extensions), but it still has the same problem.
- *  Nonetheless, we will be able to use await foreach now
- *  and see how IAsyncEnumerable is constructed under the
- *  hood.
- *  
- *  A.  Copy Step 23. We will update this code.
- *  
- *  B.  Similar to Step 12 and 13, we want to break down our
- *      existing for loops into state machines that can be
- *      expressed in the IAsyncEnumerable/IAsyncEnumerator
- *      structure. In this, we create the implementation for
- *      each.
- *      
- *  C.  Update the Consumer method to take and consume
- *      IAsyncEnumerable<int> instead of the IEnumerable<Task<int>>.
- *      This code is looking nicer.
- *      
- *  D.  Update Run as necessary as well. This should be minimal
- *      if the implementation was created well.
- *      
- *      
- *  Creating the state machine implementation of these methods
- *  always looks like quite a lot to tackle, but it gives us
- *  a good handle on how the compiler will treat the code we
- *  produce in later steps. We do still have the same issue
- *  that Concat is not actually running our producers at the
- *  same time, however.
- * 
- * =====================================================
-*/
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates construction of an IAsyncEnumerable as a custom implementation
@@ -98,6 +60,7 @@ public class CustomAsyncEnumerableSample : ITutorialSample
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public class Producer(
         int firstStart, int firstEnd, int secondStart, int secondEnd,
         CancellationToken cancellationToken)
@@ -201,6 +164,13 @@ public class CustomAsyncEnumerableSample : ITutorialSample
     public class ProductionEnumerable(int firstStart, int firstEnd, int secondStart, int secondEnd)
         : IAsyncEnumerable<int>
     {
+        /// <summary>
+        /// Returns an enumerator that iterates asynchronously through the collection.
+        /// </summary>
+        /// <param name="cancellationToken">A <see cref="T:System.Threading.CancellationToken" /> that may be used to cancel the asynchronous iteration.</param>
+        /// <returns>
+        /// An enumerator that can be used to iterate asynchronously through the collection.
+        /// </returns>
         public IAsyncEnumerator<int> GetAsyncEnumerator(
             CancellationToken cancellationToken)
         {
@@ -214,6 +184,7 @@ public class CustomAsyncEnumerableSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IAsyncEnumerable<int> values,

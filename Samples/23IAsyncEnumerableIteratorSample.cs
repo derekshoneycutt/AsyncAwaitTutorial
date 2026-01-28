@@ -1,33 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 25 : IAsyncEnumerable Iterators
- * 
- *  Now we go back and use iterator methods instead of the whole
- *  custom implementation of the interfaces. The compiler will
- *  now do all that for us, and we get much cleaner, easier to
- *  read and maintain code.
- *  
- *  A.  Copy Step 24. We will update this code.
- *  
- *  B.  The easiest way to do this is copy FirstLoop and SecondLoop
- *      from Sample 23 and convert them into async IAsyncEnumerable
- *      that include the Delay, semaphore WaitAsync, and
- *      directly yield returns the value.
- *      The custom implementation can be removed with these in place.
- *      
- *  C.  Update Run to use the iterator methods instead of the custom
- *      implementations. This should be very easy.
- *      
- *      
- *  We now have a decoupled producer/consumer pattern in our code
- *  that makes it much easier to read and maintain.
- *  We do still have the same issue that Concat is not actually running
- *  our producers at the same time, however.
- * 
- * =====================================================
-*/
-
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
 namespace AsyncAwaitTutorial;
 
@@ -115,6 +86,7 @@ public class IAsyncEnumerableGeneratorSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IAsyncEnumerable<int> values,

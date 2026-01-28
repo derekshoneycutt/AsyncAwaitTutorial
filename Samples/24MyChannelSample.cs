@@ -1,55 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 26 : Custom Channels
- * 
- *  The last few samples have a significant problem in that
- *  the Concat operation does not actually make our producers
- *  run in parallel. However, that was a part of our original
- *  design that we continue to write code against. We will now
- *  introduce Channels by creating a custom Channel class and
- *  utilizing it to demonstrate multiple producers and consumers
- *  operating in parallel on the single channel of data.
- *  
- *  A.  Copy Step 25. We will update this code.
- *  
- *  B.  Create a custom Channels class.
- *      This will need a ConcurrentQueue to store the messages,
- *      a SemaphoreSlim to notify consumers when a new item is
- *      available on the queue, and a volatile bool to flag whether
- *      the channel is completed yet.
- *      We will add Write, ReadAllAsync, and Complete methods.
- *      
- *  C.  Update FirstLoop and SecondLoop to take in an instance
- *      of our custom channel type. Instead of yield returning a value,
- *      make them write the values to the channel. This will
- *      turn them into normal async Task methods again.
- *      
- *  D.  (Optional) Add a second Consumer method that prints to
- *      the screen somehow differently. This will give us a great
- *      view of how multiple consumers actually behave on
- *      channels.
- *      
- *  E.  Update Run. We will need to create an instance of the Channel,
- *      and pass this into FirstLoop and SecondLoop. We can pass
- *      the IAsyncEnumerable from ReadAllAsync directly into the
- *      existing Consumers, but it might be good to launch all of
- *      our consumers before the producers.
- *      In this sample, I create 99 producers and twice the number
- *      of available CPU cores of consumers, making the consumers
- *      a bottleneck.
- *      We also will have to close the channel once all producers
- *      are finished producing.
- *      
- *      
- *  Finally, we have achieved a decoupling of our code that
- *  enables to do a lot of interesting work, including multiple
- *  producers and consumers without having to be significantly
- *  aware of how the other is operating in any way.
- * 
- * =====================================================
-*/
-
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
 namespace AsyncAwaitTutorial;
@@ -192,7 +141,9 @@ public class MyChannelSample : ITutorialSample
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="channel">The channel to write to.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd,
         MyChannel<int> channel,
@@ -216,6 +167,7 @@ public class MyChannelSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IAsyncEnumerable<int> values,

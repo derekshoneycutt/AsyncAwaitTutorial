@@ -1,32 +1,7 @@
-﻿/*
- * =====================================================
- *         Step 5 : Iterator Producer Sample
- * 
- *  The point of this sample is to take our lessons from
- *  the state machines and IEnumerable and just use the
- *  build in Iterator Methods to make all of that code
- *  much nicer.
- *  
- *  
- *  A.  Remove the whole state machine/IEnumerable code
- *      and build a Produce method that loops through
- *      2 ranges, sleeping in each iteration and then
- *      yield return the current value.
- *      
- *  B.  Update the Run code to utilize the new Produce method.
- *      
- * This now gives us really nice, clean code that clearly
- * separates our production and consumption, at least
- * on the logical code level. This will be much easier
- * to work with moving forward and making it async.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// Take the procedural starting sample and split the double loop into a Produce and Consume method pair.
+/// This sample uses the Iterator method technique for Producing values, allowing the compiler to make the state machine automatically.
 /// </summary>
 public class IteratorProducerSample : ITutorialSample
 {

@@ -1,43 +1,7 @@
-﻿/*
- * =====================================================
- *         Step 21 : IAsyncDisposable
- * 
- *  Now we take another small tangent to discuss IAsyncDisposable.
- *  We'll just create a fresh sample without copying prior code,
- *  and start with IDisposable, then add IAsyncDisposable on to it.
- *  
- *  A.  Starting fresh, create a simple MyDisposable class.
- *      For the first step, implement IDisposable with the
- *      disposable pattern. VS will do most of the work here for us.
- *      
- *  B.  Setup Run so that it will construct 2 of our disposables:
- *      The first will be a top-level using,
- *      the second a parenthesized using with a scoped code block.
- *      This shows the two different ways that disposables
- *      are handled with using. We also can just call Dispose directly.
- *      
- *  C.  Add IAsyncDisposable to the MyDisposable class and try to
- *      follow a similar disposable pattern, but with async
- *      code instead. We can call the original internal Dispose
- *      pattern with a false parameter after the async code
- *      to ensure some necessarily synchronous cleanup is shared.
- *      
- *  D.  Change the using statements in Run to await using.
- *      We see nothing has really changed, but it will now call
- *      DisposeAsync instead of Dispose.
- *      
- *      
- * Async disposables are an important and powerful tool for
- * managing asynchronous resources, allowing us to free
- * them as asynchronously as we are using them.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// Sample containing a demonstration of the IAsyncDisposable interface for disposing resource asynchronously
+/// Sample adding a CancellationTokenRegistration in order to demonstrate IAsyncEnumerable
 /// </summary>
 public class IAsyncDisposableSample : ITutorialSample
 {
@@ -285,6 +249,7 @@ public class IAsyncDisposableSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IEnumerable<Task<int>> values,

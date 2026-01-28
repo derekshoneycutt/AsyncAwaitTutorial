@@ -1,34 +1,9 @@
-﻿/*
- * =====================================================
- *         Step 13 : Implement Task.Delay
- * 
- *  Here, we want to show how a good implementation of
- *  Task.Delay might be done, as opposed to continuing with Thread.Sleep.
- *  
- *  
- *  A.  Implement Task.Delay and replace our original Thread.Sleep
- *      calls in the Produce method with a call to it instead.
- *      
- *  B.  Create a barebones MyTask<TResult> class that handles
- *      tasks that return a value.
- *      
- *  C.  Update Produce to return an IEnumerable<MyTask<TResult>
- *      and make the Consume method wait on the Result from
- *      each task.
- *      
- * This gets us knocking on the door of asynchronous code styles.
- * The behavior of the application may even appear to be
- * more parallel that previous points of the project.
- * 
- * =====================================================
-*/
-
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates creating a custom implementation of Task.Delay with the previous custom tasks.
+/// This sample demonstrates creating a custom implementation of Task.Delay and Task&lt;TResult&gt; with the previous custom tasks.
 /// </summary>
 public class MyTaskDelaySample : ITutorialSample
 {

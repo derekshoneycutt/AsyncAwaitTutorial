@@ -1,32 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 2 : List Producer Sample
- * 
- *  The point of this sample is to split the basic procedural
- *  sample that we started with into a pair of Produce and Consume
- *  methods, which will help us demonstrate important patterns
- *  and language tools as we progress.
- *  
- *  
- *  A.  Split off a Produce method that loops through 2 ranges,
- *      adding the values to a list that is returned at the end.
- *      
- *  B.  Make a consume method that loops through a collection of
- *      values and prints them to the screen.
- *      
- *  C.  Update Run to call Produce and Consume.
- *      
- * This separates our production of values from the consumption
- * and display of values. This is a great win for maintainable code,
- * but highlights some limitations to such a simple approach.
- * Namely, the Sleep has to be in the Consume method, and we
- * cannot consume values as they are produced--we only consume
- * values once the production has fully completed.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// Take the procedural starting sample and split the double loop into a Produce and Consume method pair.

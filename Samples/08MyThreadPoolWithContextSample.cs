@@ -1,46 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 8 : Custom Thread Pool with Execution Context Sample
- * 
- *  This launches threads counted by the number of processor count
- *  (changed from just 2!) in a pool and balances multiple actions
- *  queued into the pool.
- *  The use of AsyncLocal is included in the Run method to
- *  demonstrate that thread local storage works when you run the actions
- *  on the execution context captured for them. Otherwise, it is
- *  always just 0 when run on the thread pool from the previous samples.
- *  In a lot of Windows programming, thread local storage is
- *  important concerning the UI thread. Monitoring and running actions
- *  on the execution context will cause them to run on the UI thread
- *  as is appropriate as well.
- *  Later samples will expand on this core knowledge and how to
- *  apply it in async/await.
- *  
- *  
- *  A.  (Optional) Update the threadCount in the thread pool to
- *      Environment.ProcessorCount to (maybe) give us more threads.
- *      Update the action count in Run higher to see behavior (55?)
- *      
- *  B.  Change the mod variable in Run to AsyncLocal<int>,
- *      using ThreadLocalStorage.
- *      If you run this, you will note that the behavior
- *      always acts like mod is 0 despite modifications to it.
- *      
- *  C.  Add Execution Context support to the custom thread pool
- *      by making the queue a Tuple including the context, and
- *      creating an Execute method to run actions on the execution
- *      context from the work item queue. We have to capture the
- *      context in QueueUserWorkItem to complete this.
- *      You will then note that the thread local storage works.
- *      
- * This is a difficult but extremely important topic for how
- * we can avoid problems with threading, especially when
- * we need to do work on UI thread and other issues.
- * 
- * =====================================================
-*/
-
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace AsyncAwaitTutorial;
 
@@ -118,6 +76,7 @@ public class MyThreadPoolWithContextSample : ITutorialSample
     /// The number of actions to launch on the thread pool
     /// </summary>
     private static int _actionCount = 0;
+
     /// <summary>
     /// The reset event used to signal that all actions have completed processing
     /// </summary>

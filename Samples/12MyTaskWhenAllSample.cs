@@ -1,35 +1,9 @@
-﻿/*
- * =====================================================
- *         Step 12 : Implement Task.WhenAll
- * 
- *  Here, we want to show how a good implementation of
- *  Task.WhenAll might be done, as opposed to having our loop.
- *  
- *  
- *  A.  Create the ContinueWith implementation. This
- *      requires a new structure with 2 new properties:
- *      continuation and execution context.
- *      We make an Execute like our old thread pool and use a similar
- *      method to execute the ContinueWith methods on the thread pool.
- *      
- *  B.  Refactor Wait to use the continuation and a local
- *      reset event instead.
- *      
- *  C.  Implement Task.WhenAll and replace our original loop
- *      in the Run method with a call to it instead.
- *      
- * This is a pretty simple step but cleans up the code and
- * exercises asynchronous patterns effectively.
- * 
- * =====================================================
-*/
-
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates creating a custom implementation of Task.WhenAll with the previous custom tasks.
+/// This sample demonstrates creating a custom implementation of ContinueWith and Task.WhenAll with the previous custom tasks.
 /// </summary>
 public class MyTaskWhenAllSample : ITutorialSample
 {

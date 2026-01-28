@@ -1,27 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 2 : Thread Sample
- * 
- *  This launches multiple threads, each of which is the
- *  Consume method with different values.
- *  
- *  
- *  A.  Add a List<Thread> and launch each call to
- *      Consume as a Thread, adding it to the list.
- *      
- *  B.  After the initial loop, loop through the list
- *      of threads and Join them, effectively waiting
- *      for each to finish.
- *      
- * This is just the first step to show we can do
- * concurrency and make sure we have a basic idea of what
- * is going on under the hood. We'll also manage
- * a thread a lot in the future this way.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates launching threads within C#. That's all

@@ -1,37 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 19 : Custom Cancellation Token and Source
- * 
- *  It is now time to introduce the concepts behind the
- *  cancellation token, which we used to stop an operation that
- *  is running asynchronously.
- *  
- *  A.  Create basic CancellationToken struct and
- *      CancellationTokenSource class that it wraps around.
- *      We just want to show the basic concepts of the cancellation
- *      and how it operates so we can be comfortable with
- *      the standard one.
- *      
- *  B.  Demonstrate polling to throw OperationCanceledException
- *      if the cancellationToken is cancelled.
- *      This includes finally including SetCanceled in the
- *      TaskCompletionSource for the DoubleLoop instance.
- *      
- *  D.  Fill out Run to create a custom cancellation token source
- *      and pass its token into the instance methods.
- *      Also show registering to run a callback on cancel.
- *      We also modify Run here to demonstrate canceling early.
- *      
- *      
- * Cancellation tokens are extremely important in modern
- * asynchronous programming in C#, and for the most part,
- * you want to follow the convention of always passing around
- * cancellation tokens in async code.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// Sample used to demonstrate the structure of cancellation tokens by creating a custom cancellation token type
@@ -250,6 +217,7 @@ public class MyCancellationTokenSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IEnumerable<Task<int>> values,

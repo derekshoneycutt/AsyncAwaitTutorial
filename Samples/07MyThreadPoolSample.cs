@@ -1,36 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 7 : Custom Thread Pool Sample
- * 
- *  This updates our code to run on a thread pool instead
- *  of launching individual threads. This actually takes us
- *  a step back as we place a severe limit on the number of
- *  threads in our pool, but this allows us to demonstrate
- *  the behavior of a thread pool and how we will utilize it.
- *  
- *  
- *  A.  We first create a new MyThreadPool static class
- *      that launches a static number of background threads
- *      and loops over a queue of work actions.
- *      
- *  B.  Create an action counter and reset event that will
- *      be used to signal when all of the tasks are complete.
- *      Update Consume to decrement the counter and signal
- *      the reset event if the counter goes below 1.
- *      
- *  C.  Update the Run method to launch Consume instances on
- *      the new thread pool class and wait for the reset event
- *      at the end.
- *      
- * We are now running on a thread pool that manages the threads
- * for us, instead of manually managing a thread for each instance
- * of Consume. This is an important step towards asynchrony,
- * but we are still concurrent at this point.
- * 
- * =====================================================
-*/
-
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace AsyncAwaitTutorial;
 

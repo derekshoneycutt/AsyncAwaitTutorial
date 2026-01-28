@@ -1,27 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 17 : Standard async/await only
- * 
- *  We now know enough to just use the standard Task
- *  and async/await comfortably. We no longer have any
- *  need to use our custom Task structure.
- *  
- *      Remove the custom Task class and update all references
- *      to the standard Task class.
- *      This will require making a special DelayOnNumber method
- *      to handle the async in Produce for now.
- *      We take some attention about ConfigureAwait now that
- *      it is available to us, recalling earlier discussion
- *      in our custom Thread Pool.
- *      
- *      
- * This is the final step so now everything we do will
- * be async/await!
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates async/await in standard for the first time

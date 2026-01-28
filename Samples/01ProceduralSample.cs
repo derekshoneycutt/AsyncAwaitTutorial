@@ -1,26 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 1 : Procedural Sample
- * 
- *  The point of this sample is to show that we are running 2 loops,
- *  printing the values, with a delay between each printing.
- *  This is the basic idea of what we are trying to do in an
- *  asynchronous way with future samples.
- *  
- *  
- *  A.  Create DoubleLoop: take an identifier and 2 start/end sets
- *      print start, loop start to end in each, printing values, then print end.
- *      
- *  B.  Run can be implemented to call InstanceMethod subsequently
- *      a variable (set to 5?) number of times, one after the other
- *      
- * This really just gives us a logical basis for the procedure
- * we want to do more asynchronously moving forward.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// Samples setting the basic zero-basis, not even using threads or anything really.

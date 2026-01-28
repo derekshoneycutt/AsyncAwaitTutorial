@@ -1,29 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 27 : Standard Channels
- * 
- *  Now that we have a good concept of Channels from making a cheap
- *  version of our own, we switch over to the much more featureful
- *  standard Channels structures. Overall, our code remains the same,
- *  with just a few tweaks.
- *  
- *  A.  Copy Step 26. We will update this code.
- *  
- *  B.  Remove the custom Channel implementation and replace all
- *      references with the standard channel implementation.
- *      We will just use an Unbounded channel for now,
- *      and our Producers will receive ChannelWriter instead of
- *      the whole thing--maintaining our separation of concerns.
- *      
- *      
- *  We can now make robust asynchronous code and utilize
- *  Channels to decouple our producers and consumers, allowing
- *  for multiple of either, and a great deal of control over both.
- * 
- * =====================================================
-*/
-
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 
 namespace AsyncAwaitTutorial;
 
@@ -89,7 +64,9 @@ public class ChannelsSample : ITutorialSample
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="channel">The channel to write to</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd,
         ChannelWriter<int> channel,
@@ -114,6 +91,7 @@ public class ChannelsSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IAsyncEnumerable<int> values,

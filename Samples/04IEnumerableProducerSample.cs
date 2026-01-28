@@ -1,29 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 4 : IEnumerable Producer Sample
- * 
- *  The point of this sample is to 
- *  
- *  
- *  A.  Add the IEnumerator<int> interface to the Producer class
- *      and fill in the missing parts to fulfill the full thing.
- *      
- *  B.  Create a new ProductionEnumerable that implements
- *      IEnumerable<int>, returning a Producer in GetEnumerator.
- *      
- *  C.  Make sure Consume takes an IEnumerable<int> and just use
- *      a foreach loop on it again.
- *      
- *  D.  Update the run code to create a ProductionEnumerable.
- *      
- * This now has us using the standard Iterator pattern and
- * interfaces. This is an important step to highlight how
- * additional features we will be utilizing work.
- * 
- * =====================================================
-*/
-
-using System.Collections;
+﻿using System.Collections;
 
 namespace AsyncAwaitTutorial;
 

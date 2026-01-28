@@ -1,48 +1,9 @@
-﻿/*
- * =====================================================
- *         Step 28 : Structuring and Organizing Channels Code
- * 
- *  Since we have this nice, decoupled channels code, we take
- *  an opportunity to demonstrate one pattern that is often
- *  seen with them, where a producer class produces values into
- *  a private channel and offers a method returning 
- *  IAsyncEnumerable that reads the values from the channel.
- *  
- *  A.  Copy Step 27. We will update this code.
- *  
- *  B.  Create a Producer class and move all of the Producer
- *      related code into it.
- *      Importantly, this will need a private Channel field,
- *      the two private loop production methods, a Run method
- *      to kick off the production of values, and
- *      a ReadAllAsync method to consume the values.
- *      
- *  C.  Update Run to use the Producer class to generate the
- *      production tasks. We'll send in from ReadAllAsync
- *      on the Producer class to the consumers as before.
- *      
- *  D.  (Optional) We add some more exception handling throughout
- *      our consumer methods so that we can have full control
- *      over how they behave in cancellation, exceptions, etc.
- *      
- *      
- *  This doesn't really show anything new, just organizes
- *  the code a little bit easier. However, pay attention to
- *  the pattern of a private field Channel that is never
- *  exposed except as an IAsyncEnumerable for consumption.
- *  This is a common pattern used with async code, which
- *  ensures that the consumer does not have to be aware of
- *  how production is actually happening in any way.
- * 
- * =====================================================
-*/
-
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates utilizing Channels in a structured way to demonstrate a stream of values from a central producer class.
+/// This sample demonstrates adding a middleman to an existing structured channels pipeline.
 /// </summary>
 public class ChannelMiddlemanSample : ITutorialSample
 {
@@ -120,6 +81,7 @@ public class ChannelMiddlemanSample : ITutorialSample
         /// <param name="secondStart">The second start value.</param>
         /// <param name="secondEnd">The second maximum value, completing the second range.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+        /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
         private async Task Produce(
             int firstStart, int firstEnd, int secondStart, int secondEnd,
             CancellationToken cancellationToken)
@@ -183,15 +145,16 @@ public class ChannelMiddlemanSample : ITutorialSample
         private int? _lastValue = null;
 
         /// <summary>
-        /// The synchronize
+        /// The synchronize semaphore used to ensure compiling values are thread safe.
         /// </summary>
         private readonly SemaphoreSlim _synchronize = new(1);
 
         /// <summary>
         /// Consumes the specified values.
         /// </summary>
-        /// <param name="values">The values.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="values">The values to consume.</param>
+        /// <param name="cancellationToken">The cancellation token used to signal when the operation should not proceed.</param>
+        /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
         private async Task Consume(
             IAsyncEnumerable<int> values,
             CancellationToken cancellationToken)
@@ -222,10 +185,10 @@ public class ChannelMiddlemanSample : ITutorialSample
 
 
         /// <summary>
-        /// Intercepts the asynchronous.
+        /// Intercepts a communication pipeline.
         /// </summary>
-        /// <param name="values">The values.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="values">The values to consume for the middleman.</param>
+        /// <param name="cancellationToken">The cancellation token used to signal when the operation should not proceed.</param>
         public async Task Intercept(
             IAsyncEnumerable<int> values,
             CancellationToken cancellationToken)
@@ -255,6 +218,7 @@ public class ChannelMiddlemanSample : ITutorialSample
         /// <param name="identifier">The identifier to print as the name of the current instance.</param>
         /// <param name="values">The values to print to the screen.</param>
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+        /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
         private async Task Consume(
             string identifier,
             IAsyncEnumerable<int> values,
@@ -271,10 +235,10 @@ public class ChannelMiddlemanSample : ITutorialSample
         }
 
         /// <summary>
-        /// Runs the asynchronous.
+        /// Runs the consumers.
         /// </summary>
-        /// <param name="values">The values.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="values">The values to consume.</param>
+        /// <param name="cancellationToken">The cancellation token used to signal when the operation should not proceed.</param>
         public async Task Run(
             IAsyncEnumerable<int> values,
             CancellationToken cancellationToken)

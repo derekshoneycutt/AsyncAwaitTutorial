@@ -1,44 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 10 : Create a basic Task Completion object
- * 
- *  We want to remove the static counter and ManualResetEvent
- *  from the previous samples, and we want to track individual
- *  work items on the thread queue. This introduces us to the
- *  concept of Task. Here, we just introduce the basic
- *  Task Completion pattern which we will see repeatedly
- *  and which serve as a basis for the reason for Task.
- *  Again, we are not trying to perfectly re-create Task
- *  or even the start of TaskCompletionSource, per se,
- *  but we do want to demonstrate the patterns and concepts.
- *  
- *  
- *  A.  Create a new MyTaskCompletion class that will
- *      serve to track the progress of a work item on the
- *      thread pool. We will need a synchronization Lock,
- *      a completed flag, and an exception for fields.
- *      IsCompleted will be our one public property.
- *     
- *  B.  We want methods SetResult, SetException, and Wait.
- *      We can have a Complete private method to work for
- *      both SetResult and SetException.
- *      
- *  C.  Update Consume for both SetResult and SetException,
- *      requiring a wrapping try...catch block.
- *      
- *  D.  Introduce a list of these Task Completion objects in the
- *      Run method, and create and pass one to each instance of
- *      Consume. Wait on these Tasks at the end of Run.
- *      
- * This is a lift to create a structure for tracking the Tasks
- * that we run on the ThreadPool. However, the pattern produced
- * in the InstanceMethod of this sample is repeated again and again
- * in the following samples, so it is important to understand it.
- * 
- * =====================================================
-*/
-
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
@@ -176,6 +136,7 @@ public class MyTaskCompletionSample : ITutorialSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
+    /// <param name="taskCompletion">The task completion object to report when the consumption has completed</param>
     public static void Consume(
         string identifier,
         IEnumerable<int> values,

@@ -1,34 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 18 : Standard TaskCompletionSource
- * 
- *  We bring back the TaskCompletion pattern that we have reused
- *  repeatedly with paralleling our work in Step 6 along our async
- *  code, but using the standard TaskCompletionSource now.
- *  TaskCompletionSource can be used for many purposes, but
- *  perhaps a background thread running a long-running operation
- *  could be one.
- *  
- *  A.  Rebuild DoubleLoop that we started with, but now
- *      track it with the standard TaskCompletionSource,
- *      using the same pattern used through the custom Task
- *      implementation.
- *      
- *  B.  Update Run to launch this thread and add the Task
- *      from the TaskCompletionSource to the list of Tasks
- *      that are awaited at the end.
- *      
- *      
- * This is entirely familiar, but it shows us how we can
- * manage long running processes on our own thread and
- * offer a handle to wait on it asynchronously. This can be
- * a cheap and useful means of coordinating asynchronous code,
- * using a pattern we have repeated extensively.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates how to utilize a TaskCompletionSource to expand asynchronous code
@@ -113,6 +83,7 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IEnumerable<Task<int>> values)

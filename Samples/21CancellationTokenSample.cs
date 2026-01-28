@@ -1,36 +1,7 @@
-﻿/*
- * =====================================================
- *         Step 20 : Standard Cancellation Token and Source
- * 
- *  Here we just replace our custom cancellation token with
- *  the real, standard thing, and show how it might change our
- *  code a little bit in some spots.
- *  
- *  A.  Copy Step 19. We will update this code.
- *  
- *  B.  Remove the definition of the custom cancellation token
- *      and source. Update all references to use the standard
- *      token instead.
- *      
- *  C.  Review existing async calls and add the cancellation
- *      tokens to the calls that don't already have one yet.
- *      If we want, we can use the constructor with a timeout
- *      in the standard cancellation token source as well.
- *      
- *      
- * There are some new places we can start using cancellation token
- * now that we're using the standard thing and passing it
- * everywhere. Additionally, we can remove some of the polls
- * for its canceled state, instead just letting the leaf methods
- * that we call poll it.
- * 
- * =====================================================
-*/
-
-namespace AsyncAwaitTutorial;
+﻿namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates how to utilize CancellationToken to control asynchronous methods.
+/// This sample demonstrates how to utilize the standard CancellationToken to control asynchronous methods.
 /// </summary>
 public class CancellationTokenSample : ITutorialSample
 {
@@ -129,6 +100,7 @@ public class CancellationTokenSample : ITutorialSample
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A Task that completes when the asynchronous operation has finished.</returns>
     public static async Task Consume(
         string identifier,
         IEnumerable<Task<int>> values,

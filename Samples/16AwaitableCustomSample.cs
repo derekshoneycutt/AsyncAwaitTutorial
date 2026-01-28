@@ -1,28 +1,4 @@
-﻿/*
- * =====================================================
- *         Step 16 : First real async/await
- * 
- *  Now, we finally get to true async/await by modifying
- *  our custom task class to work with the compiler
- *  in actual async/await styles. This is just for demo
- *  purposes, but exposes what is happening in the
- *  compiler when we use async/await.
- *  
- *  A.  Add Awaiter struct and GetAwaiter() method to the
- *      custom Task structure. These must follow the
- *      convention the compiler is looking for in order
- *      to use await.
- *      
- *  B.  Refactor Consume and Run to use async/await now.
- *      
- *      
- * This is the final step so now everything we do will
- * be async/await!
- * 
- * =====================================================
-*/
-
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
@@ -30,10 +6,6 @@ namespace AsyncAwaitTutorial;
 /// <summary>
 /// This sample demonstrates using a custom Awaiter to introduce async/await
 /// </summary>
-/// <remarks>
-/// The major point of this one is to show how the compiler knows that Task can be await'ed, and the structure
-/// that it utilizes under the hood to operate.
-/// </remarks>
 public class AwaitableCustomSample : ITutorialSample
 {
     /// <summary>

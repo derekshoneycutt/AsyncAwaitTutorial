@@ -1,45 +1,10 @@
-﻿/*
- * =====================================================
- *         Step 11 : Extend custom Task structure
- * 
- *  The major goal with this one is introduce a Task.Run
- *  equivalent and the concept of ContinueWith, initially
- *  by replacing the initial Wait implementation with one
- *  based on ContinueWith instead.
- *  
- *  
- *  A.  Rename the MyTaskCompletion to MyTask and add the
- *      Task.Run equivalent implementation, including creating
- *      the state structure to pass into the thread pool.
- *      
- *  B.  Update Run and Consume to use the new MyTask.Run method.
- *      This is mostly removing code that MyTask.Run will now cover
- *      for us.
- *      We can remove the temporary ThreadPoolState with this complete.
- *      
- * This prepares us with the normal Task patterns we see throughout
- * async code in C#, and internally Wait gives us a good first example
- * of using the ContinueWith to continue async operations.
- * 
- * Of course, we are not trying to literally re-create the actual
- * Task class, so we take whatever liberties we want with the
- * style. This is just a demonstration, so we can have some fun
- * with records and stuff if we want.
- * 
- * =====================================================
-*/
-
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates making a custom Task class using the standard ThreadPool class.
 /// </summary>
-/// <remarks>
-/// The major goal with this one is introduce a Task.Run equivalent and the concept of ContinueWith,
-/// initially by replacing the initial Wait implementation with one based on ContinueWith instead.
-/// </remarks>
 public class MyTaskSample : ITutorialSample
 {
     // We don't need the old ThreadPoolState any more

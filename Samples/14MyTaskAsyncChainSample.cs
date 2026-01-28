@@ -1,34 +1,9 @@
-﻿/*
- * =====================================================
- *         Step 14 : Asynchronous Chaining with ContinueWith
- * 
- *  Here, we want to show how we can go fully asynchronous
- *  via expanding and utilizing the ContinueWith method on
- *  our custom Task structure.
- *  
- *  
- *  A.  Update ContinueWith to return a Task that completes
- *      when the continuation action has completed.
- *      Also add additional version that can handle results.
- *      
- *  B.  Refactor the Consume method to be a chain of
- *      ContinueWith. This will have to be pseudo-recursive.
- *      
- *  C. Update the Run method to no longer use Task.Run.
- *      
- * We are now officially actually exhibiting asynchronous
- * behavior. The code is not very pretty yet, but this gives
- * us considerable insight into how async/await works.
- * 
- * =====================================================
-*/
-
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates creating a custom implementation of Task.Delay with the previous custom tasks.
+/// This sample demonstrates making a truly asynchronous method via ContinueWith in a chained fashion.
 /// </summary>
 public class MyTaskAsyncChainsSample : ITutorialSample
 {
@@ -384,6 +359,7 @@ public class MyTaskAsyncChainsSample : ITutorialSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
+    /// <returns>A Task that completes when the asynchronous operation has completed.</returns>
     public static MyTask Consume(
         string identifier,
         IEnumerable<MyTask<int>> values)
