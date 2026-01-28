@@ -34,6 +34,8 @@ namespace AsyncAwaitTutorial;
 /// </summary>
 public class CancellationTokenSample : ITutorialSample
 {
+    // Remove the custom cancellation token code
+
     /// <summary>
     /// The instance method to run as independent threads in the sample. This is a synchronous method.
     /// </summary>
@@ -44,7 +46,7 @@ public class CancellationTokenSample : ITutorialSample
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
     /// <param name="completionSource">The Task Completion Source to mark when this task has completed</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public static void ThreadMethod(
+    public static void DoubleLoop(
         string identifier,
         int firstStart, int firstEnd, int secondStart, int secondEnd,
         TaskCompletionSource completionSource,
@@ -55,15 +57,13 @@ public class CancellationTokenSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-            for (int value = start; value <= end; ++value)
+            for (int value = firstStart; value <= firstEnd; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
-            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-            for (int value = start; value <= end; ++value)
+            for (int value = secondStart; value <= secondEnd; ++value)
             {
                 Thread.Sleep(1000);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -87,38 +87,65 @@ public class CancellationTokenSample : ITutorialSample
     }
 
     /// <summary>
-    /// Loops over 2 ranges of integers subsequently as an asynchronous operation
+    /// Delays for a second and then returns a given number as an asynchronous operation.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstEnd">The first range maximum.</param>
-    /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondEnd">The second range maximum.</param>
+    /// <param name="number">The number to return.</param>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task InstanceMethod(
-        string identifier,
+    /// <returns>A <see cref="Task{Int32}"/> that represents the asynchronous operation. <c>Result</c> contains the specified integer.</returns>
+    public static async Task<int> DelayOnNumber(
+        int number,
+        CancellationToken cancellationToken)
+    {
+        await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+        return number;
+    }
+
+    /// <summary>
+    /// Produces the specified ranges of values.
+    /// </summary>
+    /// <param name="firstStart">The first start value.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
+    /// <param name="secondStart">The second start value.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<Task<int>> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd,
         CancellationToken cancellationToken)
     {
-        // Change to the standard cancellation token.
-        // Send the cancellation token to the delays and remove any other polls on the token in this method--they're now superfluous
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            yield return DelayOnNumber(value, cancellationToken);
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            yield return DelayOnNumber(value, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public static async Task Consume(
+        string identifier,
+        IEnumerable<Task<int>> values,
+        CancellationToken cancellationToken)
+    {
+        // We add a cancellation token parameter and add a poll to the cancellation token to ensure that we end if the process is continuing
+
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (Task<int> valueTask in values)
         {
-            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            int value = await valueTask.ConfigureAwait(false);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
     /// <summary>
@@ -136,31 +163,29 @@ public class CancellationTokenSample : ITutorialSample
         CancellationTokenSource linked =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cts.Token);
 
-        CancellationTokenRegistration cancelRegister = linked.Token.Register(() =>
+        await using CancellationTokenRegistration cancelRegister = linked.Token.Register(() =>
         {
             Console.WriteLine("Registered cancellation.");
         });
 
-        int actionCount = 55;
         List<Task> tasks = [];
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string action = $"Action {i}";
-            // Add the cancellation token to the parameters
-            tasks.Add(
-                InstanceMethod(action,
-                    1 + mod.Value, 5 + mod.Value,
-                    1001 + mod.Value, 1005 + mod.Value,
-                    cts.Token));
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
+            IEnumerable<Task<int>> values = Produce(
+                1 + mod.Value, 5 + mod.Value,
+                1001 + mod.Value, 1005 + mod.Value,
+                linked.Token);
+            tasks.Add(Consume(identifier, values, linked.Token));
         }
 
         //We can pass the cancellation token down now that we know what to do!
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
-            ThreadMethod("Single Thread",
+            DoubleLoop("Single Thread",
                 1, 5,
                 101, 105,
                 backThreadSource, linked.Token)));

@@ -1,51 +1,31 @@
 ﻿/*
  * =====================================================
- *         Step 3 : Custom Thread Pool Sample
+ *         Step 7 : Custom Thread Pool Sample
  * 
- *  This launches 2 threads in a pool and balances
- *  multiple actions queued into the pool. This replaces
- *  the previous list of Threads for the thread pool,
- *  requiring some additional overhead.
- *  The point is not to re-create the standard ThreadPool
- *  exactly, per se, but to demonstrate the basic patterns
- *  and concepts that drive the standard ThreadPool.
+ *  This updates our code to run on a thread pool instead
+ *  of launching individual threads. This actually takes us
+ *  a step back as we place a severe limit on the number of
+ *  threads in our pool, but this allows us to demonstrate
+ *  the behavior of a thread pool and how we will utilize it.
  *  
  *  
- *  A.  Copy Step 2. We will reuse all of this.
+ *  A.  We first create a new MyThreadPool static class
+ *      that launches a static number of background threads
+ *      and loops over a queue of work actions.
  *      
- *  B.  Create a static class: MyThreadPool. In this,
- *      we will need a const or readonly static to track our
- *      thread count, and also a queue of work items to
- *      run on the thread pool. BlockingCollection<Action>
- *      is a good choice for the latter.
+ *  B.  Create an action counter and reset event that will
+ *      be used to signal when all of the tasks are complete.
+ *      Update Consume to decrement the counter and signal
+ *      the reset event if the counter goes below 1.
  *      
- *  C.  In the static constructor, create *Background*
- *      threads numbered according to the readonly field.
- *      Background threads are killed when the application exits.
- *      Each thread should have an indefinite loop,
- *      invoking the next item in the queue.
+ *  C.  Update the Run method to launch Consume instances on
+ *      the new thread pool class and wait for the reset event
+ *      at the end.
  *      
- *  D.  Add a static QueueUserWorkItem(Action action) method
- *      to add work items to the queue.
- *      
- *  E.  Start by modifying Run to run on the ThreadPool. However,
- *      note that we can no longer join the work to our
- *      working thread!
- *  
- *  F.  We will need a static counter and a ManualResetEvent
- *      because we can no longer Join the threads from the
- *      thread pool to our main thread. Initial state of
- *      the ManualResetEvent should be false.
- *      
- *  G.  Modify InstanceMethod to, at the end, decrement
- *      the counter thread-safe and if < 1, set the ManualResetEvent.
- *      
- *  H.  Update Run to wait on the ManualResetEvent at 
- *      the end instead of the Thread work we started with.
- *      
- * Async/await is built on top of the standard ThreadPool,
- * so gaining a basic understanding of it here is super
- * helpful. That is really the entire point of this sample.
+ * We are now running on a thread pool that manages the threads
+ * for us, instead of manually managing a thread for each instance
+ * of Consume. This is an important step towards asynchrony,
+ * but we are still concurrent at this point.
  * 
  * =====================================================
 */
@@ -113,32 +93,44 @@ public class MyThreadPoolSample : ITutorialSample
     /// The reset event used to signal that all actions have completed processing
     /// We need this to coordinate when to finish because we no longer can join the threads!
     /// </summary>
-    private static readonly ManualResetEventSlim _resetEvent = new(false);
+    private static ManualResetEventSlim _resetEvent = new(false);
 
     /// <summary>
-    /// The instance method to run as actions in the sample thread pool. This is a synchronous method.
+    /// Produces the specified ranges of values.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    public static void InstanceMethod(
-        string identifier,
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<int> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
+    {
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            Thread.Sleep(500);
+            yield return value;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            Thread.Sleep(500);
+            yield return value;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static void Consume(
+        string identifier,
+        IEnumerable<int> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (int value in values)
         {
-            Thread.Sleep(500);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            Thread.Sleep(500);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
@@ -157,22 +149,25 @@ public class MyThreadPoolSample : ITutorialSample
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public async Task Run(CancellationToken cancellationToken)
     {
-        int actionCount = 5;
         // make sure we know how many times we need to decrement the global counter
-        _actionCount = actionCount;
-        for (int i = 0; i < _actionCount; ++i)
+        _actionCount = 5;
+        _resetEvent = new(false);
+        for (int index = 0; index <= 5; ++index)
         {
-            int mod = 10 * i;
-            string identifier = $"Action {i}";
+            int mod = 10 * index;
+            string identifier = $"Action {index}";
             // Instead of starting our own thread, launch on the thread pool!
             MyThreadPool.QueueUserWorkItem(() =>
-                InstanceMethod(identifier,
+            {
+                IEnumerable<int> values = Produce(
                     1 + mod, 5 + mod,
-                    10001 + mod, 10005 + mod));
+                    1001 + mod, 1005 + mod);
+                Consume(identifier, values);
+            });
         }
 
         // wait for the last thread to finish now.
-        _resetEvent.Wait(cancellationToken);
+        _resetEvent.Wait();
 
         Console.WriteLine("All fin");
     }

@@ -8,12 +8,10 @@
  *  than what we did.
  *  
  *  
- *  A.  Copy Step 4. We will reuse all of this.
- *      
- *  B.  Delete all of the custom thread pool and use ThreadPool.
+ *  A.  Delete all of the custom thread pool and use ThreadPool.
  *      QueueUserWorkItem call will need updated in this.
  *      
- *  C.  Create ThreadPoolState and demonstrate starting a
+ *  B.  Create ThreadPoolState and demonstrate starting a
  *      work item on the ThreadPool with some state.
  *      
  * This is a pretty simple one, but we can spend some time
@@ -42,43 +40,55 @@ public class ThreadPoolSample : ITutorialSample
     /// <summary>
     /// The reset event used to signal that all actions have completed processing
     /// </summary>
-    private static readonly ManualResetEventSlim _resetEvent = new(false);
+    private static ManualResetEventSlim _resetEvent = new(false);
 
     /// <summary>
-    /// The instance method to run as actions in the thread pool. This is a synchronous method.
+    /// Produces the specified ranges of values.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    public static void InstanceMethod(
-        string identifier,
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<int> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
+    {
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static void Consume(
+        string identifier,
+        IEnumerable<int> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (int value in values)
         {
-            Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
         Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
 
+        // Notify that we are finished, but only if we are the last thread to finish
         if (Interlocked.Decrement(ref _actionCount) < 1)
         {
             _resetEvent.Set();
         }
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -86,19 +96,21 @@ public class ThreadPoolSample : ITutorialSample
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public async Task Run(CancellationToken cancellationToken)
     {
-        int actionCount = 55;
-        _actionCount = actionCount;
+        _actionCount = 55;
+        _resetEvent = new(false);
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < _actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string identifier = $"Action {i}";
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
             // Move to the standard ThreadPool instead; performance optimizations exist here.
             ThreadPool.QueueUserWorkItem<ThreadPoolState>(state =>
-                InstanceMethod(state.Identifier,
+            {
+                IEnumerable<int> values = Produce(
                     1 + state.Mod.Value, 5 + state.Mod.Value,
-                    1001 + state.Mod.Value, 1005 + state.Mod.Value),
-                new(identifier, mod), true);
+                    1001 + state.Mod.Value, 1005 + state.Mod.Value);
+                Consume(state.Identifier, values);
+            }, new(identifier, mod), true);
         }
 
         _resetEvent.Wait();

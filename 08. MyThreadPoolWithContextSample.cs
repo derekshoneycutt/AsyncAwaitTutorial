@@ -1,6 +1,6 @@
 ﻿/*
  * =====================================================
- *         Step 4 : Custom Thread Pool with Execution Context Sample
+ *         Step 8 : Custom Thread Pool with Execution Context Sample
  * 
  *  This launches threads counted by the number of processor count
  *  (changed from just 2!) in a pool and balances multiple actions
@@ -17,18 +17,16 @@
  *  apply it in async/await.
  *  
  *  
- *  A.  Copy Step 3. We will reuse all of this.
- *      
- *  B.  (Optional) Update the threadCount in the thread pool to
+ *  A.  (Optional) Update the threadCount in the thread pool to
  *      Environment.ProcessorCount to (maybe) give us more threads.
  *      Update the action count in Run higher to see behavior (55?)
  *      
- *  C.  Change the mod variable in Run to AsyncLocal<int>,
+ *  B.  Change the mod variable in Run to AsyncLocal<int>,
  *      using ThreadLocalStorage.
  *      If you run this, you will note that the behavior
  *      always acts like mod is 0 despite modifications to it.
  *      
- *  D.  Add Execution Context support to the custom thread pool
+ *  C.  Add Execution Context support to the custom thread pool
  *      by making the queue a Tuple including the context, and
  *      creating an Execute method to run actions on the execution
  *      context from the work item queue. We have to capture the
@@ -123,38 +121,50 @@ public class MyThreadPoolWithContextSample : ITutorialSample
     /// <summary>
     /// The reset event used to signal that all actions have completed processing
     /// </summary>
-    private static readonly ManualResetEventSlim _resetEvent = new(false);
+    private static ManualResetEventSlim _resetEvent = new(false);
 
     /// <summary>
-    /// The instance method to run as actions in the sample thread pool. This is a synchronous method.
+    /// Produces the specified ranges of values.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    public static void InstanceMethod(
-        string identifier,
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<int> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
+    {
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static void Consume(
+        string identifier,
+        IEnumerable<int> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        // Increase our delay to 1 full second as we can handle more!
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (int value in values)
         {
-            Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
         Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
 
+        // Notify that we are finished, but only if we are the last thread to finish
         if (Interlocked.Decrement(ref _actionCount) < 1)
         {
             _resetEvent.Set();
@@ -168,21 +178,24 @@ public class MyThreadPoolWithContextSample : ITutorialSample
     public async Task Run(CancellationToken cancellationToken)
     {
         // Increased to 55 to stretch it
-        int actionCount = 55;
-        _actionCount = actionCount;
+        _actionCount = 55;
+        _resetEvent = new(false);
         // having mod on thread local storage breaks before we add ExecutionContext
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < _actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string identifier = $"Action {i}";
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
             MyThreadPool.QueueUserWorkItem(() =>
-                InstanceMethod(identifier,
+            {
+                IEnumerable<int> values = Produce(
                     1 + mod.Value, 5 + mod.Value,
-                    10001 + mod.Value, 10005 + mod.Value));
+                    1001 + mod.Value, 1005 + mod.Value);
+                Consume(identifier, values);
+            });
         }
 
-        _resetEvent.Wait(cancellationToken);
+        _resetEvent.Wait();
 
         Console.WriteLine("All fin");
     }

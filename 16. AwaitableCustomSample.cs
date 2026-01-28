@@ -8,14 +8,12 @@
  *  purposes, but exposes what is happening in the
  *  compiler when we use async/await.
  *  
- *  A.  Copy Step 15. We will update this code.
- *  
- *  B.  Add Awaiter struct and GetAwaiter() method to the
+ *  A.  Add Awaiter struct and GetAwaiter() method to the
  *      custom Task structure. These must follow the
  *      convention the compiler is looking for in order
  *      to use await.
  *      
- *  C.  Refactor InstanceMethod to use async/await now.
+ *  B.  Refactor Consume and Run to use async/await now.
  *      
  *      
  * This is the final step so now everything we do will
@@ -44,19 +42,6 @@ public class AwaitableCustomSample : ITutorialSample
     public class MyTask
     {
         /// <summary>
-        /// Gets a completed task
-        /// </summary>
-        public static MyTask CompletedTask
-        {
-            get
-            {
-                MyTask ret = new();
-                ret.SetResult();
-                return ret;
-            }
-        }
-
-        /// <summary>
         /// Structure to store the continuation information currently requested for the task
         /// </summary>
         private readonly record struct RunContinuation(
@@ -68,13 +53,6 @@ public class AwaitableCustomSample : ITutorialSample
         /// </summary>
         private readonly record struct RunTask(
             Action Action,
-            MyTask Task);
-
-        /// <summary>
-        /// State structure to send to the thread pool concerning an async task to run; includes the action and the tracking task structure
-        /// </summary>
-        private readonly record struct RunAsyncTask(
-            Func<MyTask> Action,
             MyTask Task);
 
         /// <summary>
@@ -114,45 +92,6 @@ public class AwaitableCustomSample : ITutorialSample
             }
         }
 
-        // We add the Awaiter struct and the GetAwaiter() method. This is a minimal implementation, but it is all that is required.
-
-        /// <summary>
-        /// The awaiter used to await on this task type in async/await
-        /// </summary>
-        /// <seealso cref="INotifyCompletion" />
-        public struct Awaiter(MyTask task) : INotifyCompletion
-        {
-            /// <summary>
-            /// Gets a value indicating whether the task is completed.
-            /// </summary>
-            public readonly bool IsCompleted => task.IsCompleted;
-
-            /// <summary>
-            /// Gets the awaiter. Always just this.
-            /// </summary>
-            public readonly Awaiter GetAwaiter() => this;
-
-            /// <summary>
-            /// Gets the result. This task has no return, so just calls Wait();
-            /// </summary>
-            public readonly void GetResult() => task.Wait();
-
-            /// <summary>
-            /// Called when the task is completed.
-            /// </summary>
-            /// <param name="continuation">The continuation to run after completion.</param>
-            public readonly void OnCompleted(Action continuation)
-            {
-                task.ContinueWith(continuation);
-            }
-        }
-
-        /// <summary>
-        /// Gets the awaiter to use with async/await.
-        /// </summary>
-        /// <returns>A new <see cref="Awaiter"/> to use in await</returns>
-        public Awaiter GetAwaiter() => new(this);
-
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
         /// </summary>
@@ -182,7 +121,7 @@ public class AwaitableCustomSample : ITutorialSample
         /// </summary>
         /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
         /// <exception cref="System.InvalidOperationException">Cannot complete an already completed task.</exception>
-        private void Complete(Exception? ex)
+        protected void Complete(Exception? ex)
         {
             lock (_synchronize)
             {
@@ -201,7 +140,7 @@ public class AwaitableCustomSample : ITutorialSample
         /// <summary>
         /// Set the task as completed.
         /// </summary>
-        public void SetResult()
+        public virtual void SetResult()
         {
             Complete(null);
         }
@@ -270,40 +209,17 @@ public class AwaitableCustomSample : ITutorialSample
             {
                 SetContinuationUnprotected(() =>
                 {
-                    action();
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        task.SetException(ex);
+                        return;
+                    }
 
                     task.SetResult();
-                });
-            }
-
-            return task;
-        }
-
-        /// <summary>
-        /// Add a continuation action to the task that executes once the initial task has completed.
-        /// </summary>
-        /// <param name="action">The action to perform once the initial task has completed.</param>
-        /// <returns>A Task that completes once the continuation task has also completed.</returns>
-        public MyTask ContinueWith(Func<MyTask> action)
-        {
-            MyTask task = new();
-
-            lock (_synchronize)
-            {
-                SetContinuationUnprotected(() =>
-                {
-                    MyTask next = action();
-                    next.ContinueWith(() =>
-                    {
-                        if (next._exception is not null)
-                        {
-                            task.SetException(next._exception);
-                        }
-                        else
-                        {
-                            task.SetResult();
-                        }
-                    });
                 });
             }
 
@@ -332,41 +248,6 @@ public class AwaitableCustomSample : ITutorialSample
                 }
 
                 task.Task.SetResult();
-            }, new(action, task), true);
-
-            return task;
-        }
-
-        /// <summary>
-        /// Runs the specified action as a task on the thread pool.
-        /// </summary>
-        /// <param name="action">The action to run on the thread pool.</param>
-        /// <returns>A Task that represents the asynchronous operation.</returns>
-        public static MyTask Run(Func<MyTask> action)
-        {
-            MyTask task = new();
-
-            ThreadPool.QueueUserWorkItem<RunAsyncTask>(task =>
-            {
-                try
-                {
-                    MyTask next = task.Action();
-                    next.ContinueWith(() =>
-                    {
-                        if (next._exception is not null)
-                        {
-                            task.Task.SetException(next._exception);
-                        }
-                        else
-                        {
-                            task.Task.SetResult();
-                        }
-                    });
-                }
-                catch (Exception ex)
-                {
-                    task.Task.SetException(ex);
-                }
             }, new(action, task), true);
 
             return task;
@@ -420,40 +301,146 @@ public class AwaitableCustomSample : ITutorialSample
         }
     }
 
+    /// <summary>
+    /// Task structure used to store some result value of the task
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result.</typeparam>
+    public class MyTask<TResult>
+        : MyTask
+    {
+        /// <summary>
+        /// The result value; default if not completed
+        /// </summary>
+        private TResult _result = default!;
+
+        /// <summary>
+        /// Gets the result. Waits for the task to complete if it is not completed already.
+        /// </summary>
+        public TResult Result
+        {
+            get
+            {
+                Wait();
+                return _result;
+            }
+        }
+
+        // We add the Awaiter struct and the GetAwaiter() method. This is a minimal implementation, but it is all that is required.
+
+        /// <summary>
+        /// The awaiter used to await on this task type in async/await
+        /// </summary>
+        /// <seealso cref="INotifyCompletion" />
+        public struct Awaiter(MyTask<TResult> task) : INotifyCompletion
+        {
+            /// <summary>
+            /// Gets a value indicating whether the task is completed.
+            /// </summary>
+            public readonly bool IsCompleted => task.IsCompleted;
+
+            /// <summary>
+            /// Gets the awaiter. Always just this.
+            /// </summary>
+            public readonly Awaiter GetAwaiter() => this;
+
+            /// <summary>
+            /// Gets the result. This task has no return, so just calls Wait();
+            /// </summary>
+            public readonly TResult GetResult() => task.Result;
+
+            /// <summary>
+            /// Called when the task is completed.
+            /// </summary>
+            /// <param name="continuation">The continuation to run after completion.</param>
+            public readonly void OnCompleted(Action continuation)
+            {
+                task.ContinueWith(continuation);
+            }
+        }
+
+        /// <summary>
+        /// Gets the awaiter to use with async/await.
+        /// </summary>
+        /// <returns>A new <see cref="Awaiter"/> to use in await</returns>
+        public Awaiter GetAwaiter() => new(this);
+
+        /// <summary>
+        /// Set the task as completed. This always throws.
+        /// </summary>
+        public override void SetResult()
+        {
+            throw new InvalidOperationException();
+        }
+
+        /// <summary>
+        /// Sets the task as completed with a specified result.
+        /// </summary>
+        /// <param name="value">The result value to specify.</param>
+        public void SetResult(TResult value)
+        {
+            if (!IsCompleted)
+            {
+                _result = value;
+                Complete(null);
+            }
+        }
+
+        /// <summary>
+        /// Add a continuation action to the task that executes once the initial task has completed.
+        /// </summary>
+        /// <param name="action">The action to perform once the initial task has completed.</param>
+        public MyTask ContinueWith(Action<TResult> action)
+        {
+            return ContinueWith(() => action(_result));
+        }
+    }
+
     // We don't need an Iterate method any more
 
     /// <summary>
-    /// Loops over 2 ranges of integers subsequently as an asynchronous operation
+    /// Produces the specified ranges of values.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-    /// <param name="firstStart">The first range start.</param>
-    /// <param name="firstEnd">The first range maximum.</param>
-    /// <param name="secondStart">The second range start.</param>
-    /// <param name="secondEnd">The second range maximum.</param>
-    /// <returns>A Task that represents the asynchronous operation.</returns>
-    public static async Task InstanceMethod(
-        string identifier,
+    /// <param name="firstStart">The first start value.</param>
+    /// <param name="firstEnd">The first maximum value, completing the first range.</param>
+    /// <param name="secondStart">The second start value.</param>
+    /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<MyTask<int>> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
     {
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            MyTask<int> returnTask = new();
+            MyTask.Delay(1000).ContinueWith(() => returnTask.SetResult(value));
+            yield return returnTask;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            MyTask<int> returnTask = new();
+            MyTask.Delay(1000).ContinueWith(() => returnTask.SetResult(value));
+            yield return returnTask;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static async Task Consume(
+        string identifier,
+        IEnumerable<MyTask<int>> values)
+    {
+        // We update this to be async/await with our custom task type!
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        // Now we can change the return to async Task and await on our MyTask.Delay
-        // We have to mix the standard Tasks in because async methods are compiled to return Task
-        // but we can see our custom task type working with the compiler now as well!
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (MyTask<int> valueTask in values)
         {
-            await MyTask.Delay(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            await MyTask.Delay(1000);
+            int value = await valueTask;
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
 
     /// <summary>
@@ -462,19 +449,18 @@ public class AwaitableCustomSample : ITutorialSample
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public async Task Run(CancellationToken cancellationToken)
     {
-        int actionCount = 55;
         // We only work with Tasks in this method now
         List<Task> tasks = [];
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string identifier = $"Action {i}";
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
+            IEnumerable<MyTask<int>> values = Produce(
+                1 + mod.Value, 5 + mod.Value,
+                1001 + mod.Value, 1005 + mod.Value);
             // And we remove the wrapping call to Iterate, since we just get a full Task object now.
-            tasks.Add(
-                InstanceMethod(identifier,
-                    1 + mod.Value, 5 + mod.Value,
-                    1001 + mod.Value, 1005 + mod.Value));
+            tasks.Add(Consume(identifier, values));
         }
 
         // We can go ahead and await on the Task.WhenAll now, instead of Wait!

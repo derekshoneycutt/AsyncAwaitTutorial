@@ -1,39 +1,36 @@
 ﻿/*
  * =====================================================
- *         Step 18 : Standard TaskCompletionSource
+ *         Step 27 : Standard Channels
  * 
- *  We bring back the TaskCompletion pattern that we have reused
- *  repeatedly with paralleling our work in Step 6 along our async
- *  code, but using the standard TaskCompletionSource now.
- *  TaskCompletionSource can be used for many purposes, but
- *  perhaps a background thread running a long-running operation
- *  could be one.
+ *  Now that we have a good concept of Channels from making a cheap
+ *  version of our own, we switch over to the much more featureful
+ *  standard Channels structures. Overall, our code remains the same,
+ *  with just a few tweaks.
  *  
- *  A.  Rebuild DoubleLoop that we started with, but now
- *      track it with the standard TaskCompletionSource,
- *      using the same pattern used through the custom Task
- *      implementation.
+ *  A.  Copy Step 26. We will update this code.
+ *  
+ *  B.  Remove the custom Channel implementation and replace all
+ *      references with the standard channel implementation.
+ *      We will just use an Unbounded channel for now,
+ *      and our Producers will receive ChannelWriter instead of
+ *      the whole thing--maintaining our separation of concerns.
  *      
- *  B.  Update Run to launch this thread and add the Task
- *      from the TaskCompletionSource to the list of Tasks
- *      that are awaited at the end.
  *      
- *      
- * This is entirely familiar, but it shows us how we can
- * manage long running processes on our own thread and
- * offer a handle to wait on it asynchronously. This can be
- * a cheap and useful means of coordinating asynchronous code,
- * using a pattern we have repeated extensively.
+ *  We can now make robust asynchronous code and utilize
+ *  Channels to decouple our producers and consumers, allowing
+ *  for multiple of either, and a great deal of control over both.
  * 
  * =====================================================
 */
 
+using System.Threading.Channels;
+
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates how to utilize a TaskCompletionSource to expand asynchronous code
+/// This sample demonstrates utilizing the standard Channels in Producer/Consumer asynchronous pattern.
 /// </summary>
-public class TaskCompletionSourceSample : ITutorialSample
+public class ChannelsSample : ITutorialSample
 {
     /// <summary>
     /// The instance method to run as independent threads in the sample. This is a synchronous method.
@@ -44,12 +41,13 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
     /// <param name="completionSource">The Task Completion Source to mark when this task has completed</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public static void DoubleLoop(
         string identifier,
         int firstStart, int firstEnd, int secondStart, int secondEnd,
-        TaskCompletionSource completionSource)
+        TaskCompletionSource completionSource,
+        CancellationToken cancellationToken)
     {
-        // Almost identical to step 1's DoubleLoop, but completionSource is a TaskCompletionSource.
         try
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
@@ -57,17 +55,24 @@ public class TaskCompletionSourceSample : ITutorialSample
             for (int value = firstStart; value <= firstEnd; ++value)
             {
                 Thread.Sleep(1000);
+                cancellationToken.ThrowIfCancellationRequested();
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
             for (int value = secondStart; value <= secondEnd; ++value)
             {
                 Thread.Sleep(1000);
+                cancellationToken.ThrowIfCancellationRequested();
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
-            Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
 
             completionSource.SetResult();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            completionSource.SetCanceled(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -75,17 +80,7 @@ public class TaskCompletionSourceSample : ITutorialSample
         }
     }
 
-    /// <summary>
-    /// Delays for a second and then returns a given number as an asynchronous operation.
-    /// </summary>
-    /// <param name="number">The number to return.</param>
-    /// <returns>A <see cref="Task{Int32}"/> that represents the asynchronous operation. <c>Result</c> contains the specified integer.</returns>
-    public static async Task<int> DelayOnNumber(
-        int number)
-    {
-        await Task.Delay(1000).ConfigureAwait(false);
-        return number;
-    }
+    // No more custom Channels class; note how much we use ChannelReader and ChannelWriter instead now!
 
     /// <summary>
     /// Produces the specified ranges of values.
@@ -94,17 +89,22 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    /// <returns>A list of the produced values</returns>
-    public static IEnumerable<Task<int>> Produce(
-        int firstStart, int firstEnd, int secondStart, int secondEnd)
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
+    public static async Task Produce(
+        int firstStart, int firstEnd, int secondStart, int secondEnd,
+        ChannelWriter<int> channel,
+        CancellationToken cancellationToken)
     {
+        // Update to the standard channel writer
         for (int value = firstStart; value <= firstEnd; ++value)
         {
-            yield return DelayOnNumber(value);
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            await channel.WriteAsync(value, cancellationToken).ConfigureAwait(false);
         }
         for (int value = secondStart; value <= secondEnd; ++value)
         {
-            yield return DelayOnNumber(value);
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            await channel.WriteAsync(value, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -113,15 +113,16 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public static async Task Consume(
         string identifier,
-        IEnumerable<Task<int>> values)
+        IAsyncEnumerable<int> values,
+        CancellationToken cancellationToken)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        foreach (Task<int> valueTask in values)
+        await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            int value = await valueTask.ConfigureAwait(false);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
@@ -132,33 +133,44 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// Runs sample code for the sample.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public async Task Run(CancellationToken cancellationToken)
+    public async Task Run(
+        CancellationToken cancellationToken)
     {
-        List<Task> tasks = [];
-        AsyncLocal<int> mod = new();
-        for (int index = 1; index <= 55; ++index)
+        // change to the standard channels structure
+        Channel<int> channel = Channel.CreateUnbounded<int>();
+
+        for (int index = 1; index <= Environment.ProcessorCount * 2; ++index)
         {
-            mod.Value = 10 * index;
             string identifier = $"Action {index}";
-            IEnumerable<Task<int>> values = Produce(
-                1 + mod.Value, 5 + mod.Value,
-                1001 + mod.Value, 1005 + mod.Value);
-            tasks.Add(Consume(identifier, values));
+            _ = Consume(identifier, channel.Reader.ReadAllAsync(cancellationToken), cancellationToken);
         }
 
-        // We delay a short time and then spin off a background thread, with a ThreadCompletionSource to track its progress.
-        // the Thread from the ThreadCompletionSource is added to the tasks lists to wait on.
-        await Task.Delay(500).ConfigureAwait(false);
+        List<Task> tasks = [];
+        for (int index = 1; index <= 55; ++index)
+        {
+            int mod = 10 * index;
+            string identifier = $"Action {index}";
+            tasks.Add(Produce(
+                1 + mod, 5 + mod,
+                1001 + mod, 1005 + mod,
+                channel,
+                cancellationToken));
+        }
+
+        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
             DoubleLoop("Single Thread",
                 1, 5,
                 101, 105,
-                backThreadSource)));
+                backThreadSource, cancellationToken)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
+        channel.Writer.Complete();
+
+        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
 
         Console.WriteLine("All fin");
     }

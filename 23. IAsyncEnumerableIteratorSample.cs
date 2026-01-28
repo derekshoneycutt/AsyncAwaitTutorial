@@ -1,39 +1,40 @@
 ﻿/*
  * =====================================================
- *         Step 18 : Standard TaskCompletionSource
+ *         Step 25 : IAsyncEnumerable Iterators
  * 
- *  We bring back the TaskCompletion pattern that we have reused
- *  repeatedly with paralleling our work in Step 6 along our async
- *  code, but using the standard TaskCompletionSource now.
- *  TaskCompletionSource can be used for many purposes, but
- *  perhaps a background thread running a long-running operation
- *  could be one.
+ *  Now we go back and use iterator methods instead of the whole
+ *  custom implementation of the interfaces. The compiler will
+ *  now do all that for us, and we get much cleaner, easier to
+ *  read and maintain code.
  *  
- *  A.  Rebuild DoubleLoop that we started with, but now
- *      track it with the standard TaskCompletionSource,
- *      using the same pattern used through the custom Task
- *      implementation.
+ *  A.  Copy Step 24. We will update this code.
+ *  
+ *  B.  The easiest way to do this is copy FirstLoop and SecondLoop
+ *      from Sample 23 and convert them into async IAsyncEnumerable
+ *      that include the Delay, semaphore WaitAsync, and
+ *      directly yield returns the value.
+ *      The custom implementation can be removed with these in place.
  *      
- *  B.  Update Run to launch this thread and add the Task
- *      from the TaskCompletionSource to the list of Tasks
- *      that are awaited at the end.
+ *  C.  Update Run to use the iterator methods instead of the custom
+ *      implementations. This should be very easy.
  *      
  *      
- * This is entirely familiar, but it shows us how we can
- * manage long running processes on our own thread and
- * offer a handle to wait on it asynchronously. This can be
- * a cheap and useful means of coordinating asynchronous code,
- * using a pattern we have repeated extensively.
+ *  We now have a decoupled producer/consumer pattern in our code
+ *  that makes it much easier to read and maintain.
+ *  We do still have the same issue that Concat is not actually running
+ *  our producers at the same time, however.
  * 
  * =====================================================
 */
 
+using System.Runtime.CompilerServices;
+
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// This sample demonstrates how to utilize a TaskCompletionSource to expand asynchronous code
+/// This sample demonstrates construction of an IAsyncEnumerable as an async iterator method
 /// </summary>
-public class TaskCompletionSourceSample : ITutorialSample
+public class IAsyncEnumerableGeneratorSample : ITutorialSample
 {
     /// <summary>
     /// The instance method to run as independent threads in the sample. This is a synchronous method.
@@ -44,12 +45,13 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
     /// <param name="completionSource">The Task Completion Source to mark when this task has completed</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public static void DoubleLoop(
         string identifier,
         int firstStart, int firstEnd, int secondStart, int secondEnd,
-        TaskCompletionSource completionSource)
+        TaskCompletionSource completionSource,
+        CancellationToken cancellationToken)
     {
-        // Almost identical to step 1's DoubleLoop, but completionSource is a TaskCompletionSource.
         try
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
@@ -57,34 +59,29 @@ public class TaskCompletionSourceSample : ITutorialSample
             for (int value = firstStart; value <= firstEnd; ++value)
             {
                 Thread.Sleep(1000);
+                cancellationToken.ThrowIfCancellationRequested();
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
             for (int value = secondStart; value <= secondEnd; ++value)
             {
                 Thread.Sleep(1000);
+                cancellationToken.ThrowIfCancellationRequested();
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
-            Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
 
             completionSource.SetResult();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            completionSource.SetCanceled(cancellationToken);
         }
         catch (Exception ex)
         {
             completionSource.SetException(ex);
         }
-    }
-
-    /// <summary>
-    /// Delays for a second and then returns a given number as an asynchronous operation.
-    /// </summary>
-    /// <param name="number">The number to return.</param>
-    /// <returns>A <see cref="Task{Int32}"/> that represents the asynchronous operation. <c>Result</c> contains the specified integer.</returns>
-    public static async Task<int> DelayOnNumber(
-        int number)
-    {
-        await Task.Delay(1000).ConfigureAwait(false);
-        return number;
     }
 
     /// <summary>
@@ -94,17 +91,21 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     /// <returns>A list of the produced values</returns>
-    public static IEnumerable<Task<int>> Produce(
-        int firstStart, int firstEnd, int secondStart, int secondEnd)
+    public static async IAsyncEnumerable<int> Produce(
+        int firstStart, int firstEnd, int secondStart, int secondEnd,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         for (int value = firstStart; value <= firstEnd; ++value)
         {
-            yield return DelayOnNumber(value);
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            yield return value;
         }
         for (int value = secondStart; value <= secondEnd; ++value)
         {
-            yield return DelayOnNumber(value);
+            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+            yield return value;
         }
     }
 
@@ -113,15 +114,16 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// </summary>
     /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="values">The values to print to the screen.</param>
+    /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public static async Task Consume(
         string identifier,
-        IEnumerable<Task<int>> values)
+        IAsyncEnumerable<int> values,
+        CancellationToken cancellationToken)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        foreach (Task<int> valueTask in values)
+        await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            int value = await valueTask.ConfigureAwait(false);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
@@ -132,7 +134,8 @@ public class TaskCompletionSourceSample : ITutorialSample
     /// Runs sample code for the sample.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public async Task Run(CancellationToken cancellationToken)
+    public async Task Run(
+        CancellationToken cancellationToken)
     {
         List<Task> tasks = [];
         AsyncLocal<int> mod = new();
@@ -140,21 +143,21 @@ public class TaskCompletionSourceSample : ITutorialSample
         {
             mod.Value = 10 * index;
             string identifier = $"Action {index}";
-            IEnumerable<Task<int>> values = Produce(
+            // Update to the new async iterator implementation
+            IAsyncEnumerable<int> values = Produce(
                 1 + mod.Value, 5 + mod.Value,
-                1001 + mod.Value, 1005 + mod.Value);
-            tasks.Add(Consume(identifier, values));
+                1001 + mod.Value, 1005 + mod.Value,
+                cancellationToken);
+            tasks.Add(Consume(identifier, values, cancellationToken));
         }
 
-        // We delay a short time and then spin off a background thread, with a ThreadCompletionSource to track its progress.
-        // the Thread from the ThreadCompletionSource is added to the tasks lists to wait on.
-        await Task.Delay(500).ConfigureAwait(false);
+        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
         Thread instanceCaller = new(new ThreadStart(() =>
             DoubleLoop("Single Thread",
                 1, 5,
                 101, 105,
-                backThreadSource)));
+                backThreadSource, cancellationToken)));
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 

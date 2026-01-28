@@ -1,32 +1,35 @@
 ﻿/*
  * =====================================================
- *         Step 19 : Custom Cancellation Token and Source
+ *         Step 21 : IAsyncDisposable
  * 
- *  It is now time to introduce the concepts behind the
- *  cancellation token, which we used to stop an operation that
- *  is running asynchronously.
+ *  Now we take another small tangent to discuss IAsyncDisposable.
+ *  We'll just create a fresh sample without copying prior code,
+ *  and start with IDisposable, then add IAsyncDisposable on to it.
  *  
- *  A.  Create basic CancellationToken struct and
- *      CancellationTokenSource class that it wraps around.
- *      We just want to show the basic concepts of the cancellation
- *      and how it operates so we can be comfortable with
- *      the standard one.
+ *  A.  Starting fresh, create a simple MyDisposable class.
+ *      For the first step, implement IDisposable with the
+ *      disposable pattern. VS will do most of the work here for us.
  *      
- *  B.  Demonstrate polling to throw OperationCanceledException
- *      if the cancellationToken is cancelled.
- *      This includes finally including SetCanceled in the
- *      TaskCompletionSource for the DoubleLoop instance.
+ *  B.  Setup Run so that it will construct 2 of our disposables:
+ *      The first will be a top-level using,
+ *      the second a parenthesized using with a scoped code block.
+ *      This shows the two different ways that disposables
+ *      are handled with using. We also can just call Dispose directly.
  *      
- *  D.  Fill out Run to create a custom cancellation token source
- *      and pass its token into the instance methods.
- *      Also show registering to run a callback on cancel.
- *      We also modify Run here to demonstrate canceling early.
+ *  C.  Add IAsyncDisposable to the MyDisposable class and try to
+ *      follow a similar disposable pattern, but with async
+ *      code instead. We can call the original internal Dispose
+ *      pattern with a false parameter after the async code
+ *      to ensure some necessarily synchronous cleanup is shared.
+ *      
+ *  D.  Change the using statements in Run to await using.
+ *      We see nothing has really changed, but it will now call
+ *      DisposeAsync instead of Dispose.
  *      
  *      
- * Cancellation tokens are extremely important in modern
- * asynchronous programming in C#, and for the most part,
- * you want to follow the convention of always passing around
- * cancellation tokens in async code.
+ * Async disposables are an important and powerful tool for
+ * managing asynchronous resources, allowing us to free
+ * them as asynchronously as we are using them.
  * 
  * =====================================================
 */
@@ -34,9 +37,9 @@
 namespace AsyncAwaitTutorial;
 
 /// <summary>
-/// Sample used to demonstrate the structure of cancellation tokens by creating a custom cancellation token type
+/// Sample containing a demonstration of the IAsyncDisposable interface for disposing resource asynchronously
 /// </summary>
-public class MyCancellationTokenSample : ITutorialSample
+public class IAsyncDisposableSample : ITutorialSample
 {
     /// <summary>
     /// Struct representing a cancellation token to notify the requested cancellation of an operation
@@ -67,6 +70,30 @@ public class MyCancellationTokenSample : ITutorialSample
             {
                 throw new OperationCanceledException();
             }
+        }
+    }
+
+    /// <summary>
+    /// A registration handle that unregisters the callback when disposed.
+    /// </summary>
+    public readonly struct MyCancellationTokenRegistration(
+        MyCancellationTokenSource source, Action callback)
+        : IDisposable, IAsyncDisposable
+    {
+        /// <summary>
+        /// Releases unmanaged and - optionally - managed resources.
+        /// </summary>
+        public void Dispose()
+        {
+            source.Unregister(callback);
+        }
+
+        /// <summary>
+        /// Releases unmanaged and - optionally - managed resources as an asynchronous operation.
+        /// </summary>
+        public async ValueTask DisposeAsync()
+        {
+            source.Unregister(callback);
         }
     }
 
@@ -115,18 +142,33 @@ public class MyCancellationTokenSample : ITutorialSample
         /// Registers the specified callback action to perform upon cancellation.
         /// </summary>
         /// <param name="callback">The callback to perform upon cancellation.</param>
-        public void Register(Action callback)
+        public MyCancellationTokenRegistration Register(Action callback)
         {
-            lock(_callbacks)
+            lock (_callbacks)
             {
                 if (!_isCancellationRequested)
                 {
                     _callbacks.Add(callback);
-                    return;
+                    return new(this, callback);
                 }
             }
 
             callback();
+            return new(this, callback);
+        }
+
+        /// <summary>
+        /// Unregisters the specified callback.
+        /// </summary>
+        public void Unregister(Action callback)
+        {
+            lock (_callbacks)
+            {
+                if (!_isCancellationRequested && _callbacks.Contains(callback))
+                {
+                    _callbacks.Remove(callback);
+                }
+            }
         }
 
         /// <summary>
@@ -167,12 +209,10 @@ public class MyCancellationTokenSample : ITutorialSample
         TaskCompletionSource completionSource,
         MyCancellationToken cancellationToken)
     {
-        // We add a cancellation token parameter and add a bunch of polls to the cancellation token to ensure that we end if the process is continuing
-
         try
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
-            
+
             for (int value = firstStart; value <= firstEnd; ++value)
             {
                 Thread.Sleep(1000);
@@ -190,7 +230,6 @@ public class MyCancellationTokenSample : ITutorialSample
 
             completionSource.SetResult();
         }
-        // We can now also specifically catch OperationCanceledException and send a Canceled state to our task completion source!
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             completionSource.SetCanceled();
@@ -211,8 +250,6 @@ public class MyCancellationTokenSample : ITutorialSample
         int number,
         MyCancellationToken cancellationToken)
     {
-        // We add a cancellation token parameter and poll it
-
         cancellationToken.ThrowIfCancellationRequested();
         await Task.Delay(1000).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
@@ -232,8 +269,6 @@ public class MyCancellationTokenSample : ITutorialSample
         int firstStart, int firstEnd, int secondStart, int secondEnd,
         MyCancellationToken cancellationToken)
     {
-        // We add a cancellation token parameter and pass it along
-
         for (int value = firstStart; value <= firstEnd; ++value)
         {
             yield return DelayOnNumber(value, cancellationToken);
@@ -273,13 +308,14 @@ public class MyCancellationTokenSample : ITutorialSample
     /// Runs sample code for the sample.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-    public async Task Run(CancellationToken cancellationToken)
+    public async Task Run(
+        CancellationToken cancellationToken)
     {
-        // Create a cancellation token source
         MyCancellationTokenSource cts = new();
 
-        // Add a callback to perform something when the cancellation token is cancelled
-        cts.Register(() =>
+        // We can use await using here to ensure it is unregistered cleanly,
+        // or we can manually dispose later
+        await using MyCancellationTokenRegistration cancelRegister = cts.Register(() =>
         {
             Console.WriteLine("Registered cancellation.");
         });
@@ -290,7 +326,6 @@ public class MyCancellationTokenSample : ITutorialSample
         {
             mod.Value = 10 * index;
             string identifier = $"Action {index}";
-            // Add the cancellation token to the parameters
             IEnumerable<Task<int>> values = Produce(
                 1 + mod.Value, 5 + mod.Value,
                 1001 + mod.Value, 1005 + mod.Value,
@@ -300,7 +335,6 @@ public class MyCancellationTokenSample : ITutorialSample
 
         await Task.Delay(500).ConfigureAwait(false);
         TaskCompletionSource backThreadSource = new();
-        // Add the cancellation token to the parameters
         Thread instanceCaller = new(new ThreadStart(() =>
             DoubleLoop("Single Thread",
                 1, 5,
@@ -309,11 +343,11 @@ public class MyCancellationTokenSample : ITutorialSample
         instanceCaller.Start();
         tasks.Add(backThreadSource.Task);
 
-        // Handle cancellation with try...catch (OperationCancelledException)
         try
         {
-            // Force an early cancellation!
             await Task.Delay(3000).ConfigureAwait(false);
+            // We can unregister the callback prior to cancellation, or let it be called
+            //await cancelRegister.DisposeAsync().ConfigureAwait(false);
             cts.Cancel();
 
             await Task.WhenAll(tasks).ConfigureAwait(false);

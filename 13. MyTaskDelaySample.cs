@@ -1,18 +1,24 @@
 ﻿/*
  * =====================================================
- *         Step 9 : Implement Task.Delay
+ *         Step 13 : Implement Task.Delay
  * 
  *  Here, we want to show how a good implementation of
  *  Task.Delay might be done, as opposed to continuing with Thread.Sleep.
  *  
  *  
- *  A.  Copy Step 8. We will reuse all of this.
+ *  A.  Implement Task.Delay and replace our original Thread.Sleep
+ *      calls in the Produce method with a call to it instead.
  *      
- *  B.  Implement Task.Delay and replace our original Thread.Sleep
- *      calls in the InstanceMethod method with a call to it instead.
+ *  B.  Create a barebones MyTask<TResult> class that handles
+ *      tasks that return a value.
  *      
- * This is a pretty simple step as well, but starts us
- * in the direction of real asynchrony.
+ *  C.  Update Produce to return an IEnumerable<MyTask<TResult>
+ *      and make the Consume method wait on the Result from
+ *      each task.
+ *      
+ * This gets us knocking on the door of asynchronous code styles.
+ * The behavior of the application may even appear to be
+ * more parallel that previous points of the project.
  * 
  * =====================================================
 */
@@ -110,8 +116,9 @@ public class MyTaskDelaySample : ITutorialSample
         /// Marks the task as complete, with or without an exception
         /// </summary>
         /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
-        private void Complete(Exception? ex)
+        protected void Complete(Exception? ex)
         {
+            // Make this protected
             lock (_synchronize)
             {
                 if (_completed)
@@ -129,8 +136,9 @@ public class MyTaskDelaySample : ITutorialSample
         /// <summary>
         /// Set the task as completed.
         /// </summary>
-        public void SetResult()
+        public virtual void SetResult()
         {
+            // Make this virtual
             Complete(null);
         }
 
@@ -274,35 +282,96 @@ public class MyTaskDelaySample : ITutorialSample
     }
 
     /// <summary>
-    /// The instance method to run as tasks.
+    /// Task structure used to store some result value of the task
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <typeparam name="TResult">The type of the result.</typeparam>
+    public class MyTask<TResult>
+        : MyTask
+    {
+        /// <summary>
+        /// The result value; default if not completed
+        /// </summary>
+        private TResult _result = default!;
+
+        /// <summary>
+        /// Gets the result. Waits for the task to complete if it is not completed already.
+        /// </summary>
+        public TResult Result
+        {
+            get
+            {
+                Wait();
+                return _result;
+            }
+        }
+
+        /// <summary>
+        /// Set the task as completed. This always throws.
+        /// </summary>
+        public override void SetResult()
+        {
+            throw new InvalidOperationException();
+        }
+
+        /// <summary>
+        /// Sets the task as completed with a specified result.
+        /// </summary>
+        /// <param name="value">The result value to specify.</param>
+        public void SetResult(TResult value)
+        {
+            if (!IsCompleted)
+            {
+                _result = value;
+                Complete(null);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Produces the specified ranges of values.
+    /// </summary>
     /// <param name="firstStart">The first start value.</param>
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    public static void InstanceMethod(
-        string identifier,
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<MyTask<int>> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
+    {
+        // Update all of this to return MyTask<int> that finishes with the value after the delay.
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            MyTask<int> returnTask = new();
+            MyTask.Delay(1000).ContinueWith(() => returnTask.SetResult(value));
+            yield return returnTask;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            MyTask<int> returnTask = new();
+            MyTask.Delay(1000).ContinueWith(() => returnTask.SetResult(value));
+            yield return returnTask;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static void Consume(
+        string identifier,
+        IEnumerable<MyTask<int>> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        // Update the loops to call the custom Delay instead of Thread.Sleep
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (MyTask<int> value in values)
         {
-            MyTask.Delay(1000).Wait();
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            MyTask.Delay(1000).Wait();
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
+            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value.Result}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
+
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -310,17 +379,20 @@ public class MyTaskDelaySample : ITutorialSample
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public async Task Run(CancellationToken cancellationToken)
     {
-        int actionCount = 55;
         List<MyTask> tasks = [];
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string identifier = $"Action {i}";
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
             tasks.Add(MyTask.Run(() =>
-                InstanceMethod(identifier,
+            {
+                // Update to MyTask<int> values
+                IEnumerable<MyTask<int>> values = Produce(
                     1 + mod.Value, 5 + mod.Value,
-                    1001 + mod.Value, 1005 + mod.Value)));
+                    1001 + mod.Value, 1005 + mod.Value);
+                Consume(identifier, values);
+            }));
         }
 
         MyTask.WhenAll(tasks).Wait();

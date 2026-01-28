@@ -1,14 +1,21 @@
 ﻿/*
  * =====================================================
- *         Step 8 : Implement Task.WhenAll
+ *         Step 12 : Implement Task.WhenAll
  * 
  *  Here, we want to show how a good implementation of
  *  Task.WhenAll might be done, as opposed to having our loop.
  *  
  *  
- *  A.  Copy Step 7. We will reuse all of this.
+ *  A.  Create the ContinueWith implementation. This
+ *      requires a new structure with 2 new properties:
+ *      continuation and execution context.
+ *      We make an Execute like our old thread pool and use a similar
+ *      method to execute the ContinueWith methods on the thread pool.
  *      
- *  B.  Implement Task.WhenAll and replace our original loop
+ *  B.  Refactor Wait to use the continuation and a local
+ *      reset event instead.
+ *      
+ *  C.  Implement Task.WhenAll and replace our original loop
  *      in the Run method with a call to it instead.
  *      
  * This is a pretty simple step but cleans up the code and
@@ -60,6 +67,8 @@ public class MyTaskWhenAllSample : ITutorialSample
         /// </summary>
         private Exception? _exception = null;
 
+        // Remove the ManualResetEvent for waiting and add an action for continuation and it's execution context to run on
+
         /// <summary>
         /// The action to continue with once the task has completed, or <c>null</c> if no continuation has been added to this task
         /// </summary>
@@ -81,6 +90,8 @@ public class MyTaskWhenAllSample : ITutorialSample
                 }
             }
         }
+
+        // Add Execute method just like the custom ThreadPool implementation so we can have control with the Task to run actions on the appropriate execution context
 
         /// <summary>
         /// Executes the specified action on the specified context, if the context is given.
@@ -109,7 +120,7 @@ public class MyTaskWhenAllSample : ITutorialSample
         /// <summary>
         /// Marks the task as complete, with or without an exception
         /// </summary>
-        /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param
+        /// <param name="ex">The exception that should close the task, or <c>null</c> if no exception occurred.</param>
         private void Complete(Exception? ex)
         {
             lock (_synchronize)
@@ -122,6 +133,7 @@ public class MyTaskWhenAllSample : ITutorialSample
                 _completed = true;
                 _exception = ex;
 
+                // Run the continuation on the thread pool, no more wait event to set *here*
                 Execute(_continuation);
             }
         }
@@ -167,6 +179,8 @@ public class MyTaskWhenAllSample : ITutorialSample
         /// </summary>
         public void Wait()
         {
+            // Refactor the Wait method to use the continuation to set a reset event created here.
+
             ManualResetEventSlim? reset = null;
 
             lock (_synchronize)
@@ -261,38 +275,47 @@ public class MyTaskWhenAllSample : ITutorialSample
         }
     }
 
-
-
     /// <summary>
-    /// The instance method to run as tasks.
+    /// Produces the specified ranges of values.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    public static void InstanceMethod(
-        string identifier,
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<int> Produce(
         int firstStart, int firstEnd, int secondStart, int secondEnd)
+    {
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static void Consume(
+        string identifier,
+        IEnumerable<int> values)
     {
         Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-        (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-        for (int value = start; value <= end; ++value)
+        foreach (int value in values)
         {
-            Thread.Sleep(1000);
-            Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-        }
-        (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-        for (int value = start; value <= end; ++value)
-        {
-            Thread.Sleep(1000);
             Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
         }
 
-        Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
     }
-
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -300,17 +323,19 @@ public class MyTaskWhenAllSample : ITutorialSample
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public async Task Run(CancellationToken cancellationToken)
     {
-        int actionCount = 55;
         List<MyTask> tasks = [];
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string identifier = $"Action {i}";
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
             tasks.Add(MyTask.Run(() =>
-                InstanceMethod(identifier,
+            {
+                IEnumerable<int> values = Produce(
                     1 + mod.Value, 5 + mod.Value,
-                    1001 + mod.Value, 1005 + mod.Value)));
+                    1001 + mod.Value, 1005 + mod.Value);
+                Consume(identifier, values);
+            }));
         }
 
         // Replace the loop with a much more efficient WhenAll

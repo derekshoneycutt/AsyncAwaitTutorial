@@ -1,6 +1,6 @@
 ﻿/*
  * =====================================================
- *         Step 6 : Create a basic Task Completion object
+ *         Step 10 : Create a basic Task Completion object
  * 
  *  We want to remove the static counter and ManualResetEvent
  *  from the previous samples, and we want to track individual
@@ -13,24 +13,22 @@
  *  but we do want to demonstrate the patterns and concepts.
  *  
  *  
- *  A.  Copy Step 5. We will reuse all of this.
- *      
- *  B.  Create a new MyTaskCompletion class that will
+ *  A.  Create a new MyTaskCompletion class that will
  *      serve to track the progress of a work item on the
  *      thread pool. We will need a synchronization Lock,
  *      a completed flag, and an exception for fields.
  *      IsCompleted will be our one public property.
  *     
- *  C.  We want methods SetResult, SetException, and Wait.
+ *  B.  We want methods SetResult, SetException, and Wait.
  *      We can have a Complete private method to work for
  *      both SetResult and SetException.
  *      
+ *  C.  Update Consume for both SetResult and SetException,
+ *      requiring a wrapping try...catch block.
+ *      
  *  D.  Introduce a list of these Task Completion objects in the
  *      Run method, and create and pass one to each instance of
- *      InstanceMethod. Wait on these Tasks at the end of Run.
- *      
- *  E.  Update InstanceMethod for both SetResult and SetException,
- *      requiring a wrapping try...catch block.
+ *      Consume. Wait on these Tasks at the end of Run.
  *      
  * This is a lift to create a structure for tracking the Tasks
  * that we run on the ThreadPool. However, the pattern produced
@@ -52,7 +50,7 @@ public class MyTaskCompletionSample : ITutorialSample
     /// <summary>
     /// State structure to send to the instance method for work items queued on the thread pool
     /// </summary>
-    readonly record struct ThreadPoolState(string Identifier, AsyncLocal<int> Mod);
+    readonly record struct ThreadPoolState(string Identifier, AsyncLocal<int> Mod, MyTaskCompletion TaskCompletion);
 
     /// <summary>
     /// Custom class representing when a task is completed on the thread pool
@@ -151,17 +149,36 @@ public class MyTaskCompletionSample : ITutorialSample
     // We remove the _actionCount and _resetEvent because now we can track them with our Task objects well enough.
 
     /// <summary>
-    /// The instance method to run as actions in the thread pool. This is a synchronous method.
+    /// Produces the specified ranges of values.
     /// </summary>
-    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
     /// <param name="firstStart">The first start value.</param>
     /// <param name="firstEnd">The first maximum value, completing the first range.</param>
     /// <param name="secondStart">The second start value.</param>
     /// <param name="secondEnd">The second maximum value, completing the second range.</param>
-    /// <param name="taskCompletion">The task completion object to notify completion with.</param>
-    public static void InstanceMethod(
+    /// <returns>A list of the produced values</returns>
+    public static IEnumerable<int> Produce(
+        int firstStart, int firstEnd, int secondStart, int secondEnd)
+    {
+        for (int value = firstStart; value <= firstEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+        for (int value = secondStart; value <= secondEnd; ++value)
+        {
+            Thread.Sleep(1000);
+            yield return value;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the collection, printing each value to the screen
+    /// </summary>
+    /// <param name="identifier">The identifier to print as the name of the current instance.</param>
+    /// <param name="values">The values to print to the screen.</param>
+    public static void Consume(
         string identifier,
-        int firstStart, int firstEnd, int secondStart, int secondEnd,
+        IEnumerable<int> values,
         MyTaskCompletion taskCompletion) // New parameter to track the task's completion with
     {
         //Wrap the whole worker method in a try block
@@ -169,20 +186,12 @@ public class MyTaskCompletionSample : ITutorialSample
         {
             Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
-            (int start, int end) = firstStart <= firstEnd ? (firstStart, firstEnd) : (firstEnd, firstStart);
-            for (int value = start; value <= end; ++value)
+            foreach (int value in values)
             {
-                Thread.Sleep(1000);
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-            }
-            (start, end) = secondStart <= secondEnd ? (secondStart, secondEnd) : (secondEnd, secondStart);
-            for (int value = start; value <= end; ++value)
-            {
-                Thread.Sleep(1000);
                 Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
             }
 
-            Console.WriteLine($"Fin  {identifier} / {Environment.CurrentManagedThreadId}");
+            Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
 
             // set the task as complete
             taskCompletion.SetResult();
@@ -200,26 +209,26 @@ public class MyTaskCompletionSample : ITutorialSample
     /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
     public async Task Run(CancellationToken cancellationToken)
     {
-        int actionCount = 55;
         // Create a list of the tasks to monitor
         List<MyTaskCompletion> tasks = [];
         AsyncLocal<int> mod = new();
-        for (int i = 0; i < actionCount; ++i)
+        for (int index = 1; index <= 55; ++index)
         {
-            mod.Value = 10 * i;
-            string identifier = $"Action {i}";
+            mod.Value = 10 * index;
+            string identifier = $"Action {index}";
             // Create a task to send to the instance method to track the completion of the work and add it to the list
             MyTaskCompletion taskCompletion = new();
             ThreadPool.QueueUserWorkItem<ThreadPoolState>(state =>
-                InstanceMethod(state.Identifier,
+            {
+                IEnumerable<int> values = Produce(
                     1 + state.Mod.Value, 5 + state.Mod.Value,
-                    1001 + state.Mod.Value, 1005 + state.Mod.Value,
-                    taskCompletion),
-                new(identifier, mod), true);
+                    1001 + state.Mod.Value, 1005 + state.Mod.Value);
+                Consume(state.Identifier, values, state.TaskCompletion);
+            }, new(identifier, mod, taskCompletion), true);
             tasks.Add(taskCompletion);
         }
 
-        // Wait for tall the tasks instead of the reset event
+        // Wait for all the tasks instead of the reset event
         foreach (MyTaskCompletion task in tasks)
         {
             task.Wait();
