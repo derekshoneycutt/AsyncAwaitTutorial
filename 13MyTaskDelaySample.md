@@ -122,11 +122,11 @@ void Consume(
     string identifier,
     IEnumerable<MyTask<int>> values)
 {
-    // Remove all the funny tracking we had to add before! We're back to just a normal looking method!
     Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
 
     foreach (MyTask<int> value in values)
     {
+		// Use value.Result here to wait on each iteration
         Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value.Result}");
     }
 
