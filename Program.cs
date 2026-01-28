@@ -29,7 +29,9 @@ Dictionary<int, TutorialSample> samples = new()
     { 24, new("Custom Channels", "Extends the previous work into a basic implementation of Channels for Producer/Consumer pattern.", new MyChannelSample()) },
     { 25, new("Channels", "Simple demonstration of the Producer/Consumer asynchronous pattern in C# with Channels.", new ChannelsSample()) },
     { 26, new("Structured Channels", "Demonstration of a structured use of channels for streaming values.", new StructuredChannelsSample()) },
-    { 27, new("Channel Middleman", "Demonstration of adding a middleman to the structured channels pipeline.", new ChannelMiddlemanSample()) }
+    { 27, new("Channel Middleman", "Demonstration of adding a middleman to the structured channels pipeline.", new ChannelMiddlemanSample()) },
+    { 28, new("DataFlow Middleman", "Turns the middleman of the channels pipeline into a DataFlow pipeline.", new DataFlowMiddlemanSample()) },
+    { 29, new("DataFlow Complete", "Turns the entire pipeline into a DataFlow pipeline.", new DataFlowCompleteSample()) }
 };
 
 bool doContinue = true;

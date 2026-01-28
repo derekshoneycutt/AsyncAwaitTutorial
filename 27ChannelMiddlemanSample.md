@@ -105,6 +105,8 @@ All kinds of interesting pipeline logic can be constructed, this only serving as
 
 [Previous: Structuring a Channels Pipeline](26StructuredChannelsSample.md)
 
+[Next: Introduce Dataflow in the Middleman](28DataFlowMiddlemanSample.md)
+
 #### Full Navigation
 
 ##### 1. Conceptual Setup
@@ -151,4 +153,9 @@ All kinds of interesting pipeline logic can be constructed, this only serving as
 1. [Standard Channels](25ChannelsSample.md)
 1. [Structuring a Channels Pipeline](26StructuredChannelsSample.md)
 1. [Extending Channels Pipelines with a Middleman](27ChannelMiddlemanSample.md)
+
+##### 7. Dataflow
+
+28. [Introduce Dataflow in the Middleman](28DataFlowMiddlemanSample.md)
+1. [Replace Channels Pipeline with Dataflow Blocks](29DataFlowCompleteSample.md)
 

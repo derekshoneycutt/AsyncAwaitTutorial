@@ -38,13 +38,14 @@
 */
 
 using System.Threading.Channels;
+using System.Threading.Tasks.Dataflow;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates utilizing Channels in a structured way to demonstrate a stream of values from a central producer class.
 /// </summary>
-public class ChannelMiddlemanSample : ITutorialSample
+public class DataFlowMiddlemanSample : ITutorialSample
 {
     /// <summary>
     /// The instance method to run as independent threads in the sample. This is a synchronous method.
@@ -162,12 +163,53 @@ public class ChannelMiddlemanSample : ITutorialSample
     /// </summary>
     public class Middleman
     {
-        // We add a new Middleman class that is a little bit consumer, a little bit producer
+        /// <summary>
+        /// The buffer
+        /// </summary>
+        private readonly BufferBlock<int> _buffer;
 
         /// <summary>
-        /// The channel used to communicate the values
+        /// The batch block
         /// </summary>
-        private readonly Channel<int> _channel = Channel.CreateUnbounded<int>();
+        private readonly BatchBlock<int> _batch;
+
+        /// <summary>
+        /// The transform block used to merge 2 items together.
+        /// </summary>
+        private readonly TransformBlock<int[], int> _transform;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Middleman"/> class.
+        /// </summary>
+        public Middleman(
+            CancellationToken cancellationToken)
+        {
+            _buffer = new(new()
+            {
+                CancellationToken = cancellationToken,
+                BoundedCapacity = Environment.ProcessorCount * 2
+            });
+            _batch = new(2, new()
+            {
+                CancellationToken = cancellationToken,
+                BoundedCapacity = Environment.ProcessorCount * 2,
+                Greedy = true,
+                MaxMessagesPerTask = 5
+            });
+            _transform = new(values =>
+                (100000 * values[0]) + (values.Length > 0 ? values[1] : 0), new()
+                {
+                    CancellationToken = cancellationToken,
+                    BoundedCapacity = Environment.ProcessorCount * 2,
+                    MaxDegreeOfParallelism = Environment.ProcessorCount * 2,
+                    MaxMessagesPerTask = 5,
+                    SingleProducerConstrained = false
+                });
+
+
+            _buffer.LinkTo(_batch);
+            _batch.LinkTo(_transform);
+        }
 
         /// <summary>
         /// Reads all values as an asynchronous collection.
@@ -175,17 +217,7 @@ public class ChannelMiddlemanSample : ITutorialSample
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
         /// <returns>A <see cref="IAsyncEnumerable{Int32}"/> that iterates each time a new value is produced.</returns>
         public IAsyncEnumerable<int> ReadAllAsync(CancellationToken cancellationToken) =>
-            _channel.Reader.ReadAllAsync(cancellationToken);
-
-        /// <summary>
-        /// The last value
-        /// </summary>
-        private int? _lastValue = null;
-
-        /// <summary>
-        /// The synchronize
-        /// </summary>
-        private readonly SemaphoreSlim _synchronize = new(1);
+            _transform.ReceiveAllAsync(cancellationToken);
 
         /// <summary>
         /// Consumes the specified values.
@@ -198,25 +230,7 @@ public class ChannelMiddlemanSample : ITutorialSample
         {
             await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                await _synchronize.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
-                {
-                    if (_lastValue is null)
-                    {
-                        _lastValue = value;
-                    }
-                    else
-                    {
-                        await _channel.Writer.WriteAsync(
-                            (100000 * _lastValue.Value) + value,
-                            cancellationToken).ConfigureAwait(false);
-                        _lastValue = null;
-                    }
-                }
-                finally
-                {
-                    _synchronize.Release();
-                }
+                await _buffer.SendAsync(value, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -238,8 +252,9 @@ public class ChannelMiddlemanSample : ITutorialSample
                     cancellationToken));
             }
             await Task.WhenAll(consumers).ConfigureAwait(false);
-            _channel.Writer.Complete();
-
+            _buffer.Complete();
+            _batch.Complete();
+            _transform.Complete();
         }
     }
 
@@ -299,7 +314,7 @@ public class ChannelMiddlemanSample : ITutorialSample
         Producer producer = new(55);
         Consumer consumer = new();
         // We add the middleman and inject it between the producer and consumer
-        Middleman middleman = new();
+        Middleman middleman = new(cancellationToken);
         _ = consumer.Run(middleman.ReadAllAsync(cancellationToken), cancellationToken);
         _ = middleman.Intercept(producer.ReadAllAsync(cancellationToken), cancellationToken);
         

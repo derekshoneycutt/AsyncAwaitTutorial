@@ -36,15 +36,14 @@
  * 
  * =====================================================
 */
-
-using System.Threading.Channels;
+using System.Threading.Tasks.Dataflow;
 
 namespace AsyncAwaitTutorial;
 
 /// <summary>
 /// This sample demonstrates utilizing Channels in a structured way to demonstrate a stream of values from a central producer class.
 /// </summary>
-public class ChannelMiddlemanSample : ITutorialSample
+public class DataFlowCompleteSample : ITutorialSample
 {
     /// <summary>
     /// The instance method to run as independent threads in the sample. This is a synchronous method.
@@ -97,21 +96,8 @@ public class ChannelMiddlemanSample : ITutorialSample
     /// <summary>
     /// Producer class used to generate integer values and send them over a channel
     /// </summary>
-    public class Producer(int count)
+    public class Producer(int count, ITargetBlock<int> targetBlock)
     {
-        /// <summary>
-        /// The channel used to communicate the values
-        /// </summary>
-        private readonly Channel<int> _channel = Channel.CreateUnbounded<int>();
-
-        /// <summary>
-        /// Reads all values as an asynchronous collection.
-        /// </summary>
-        /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        /// <returns>A <see cref="IAsyncEnumerable{Int32}"/> that iterates each time a new value is produced.</returns>
-        public IAsyncEnumerable<int> ReadAllAsync(CancellationToken cancellationToken) =>
-            _channel.Reader.ReadAllAsync(cancellationToken);
-
         /// <summary>
         /// Produces the specified ranges of values.
         /// </summary>
@@ -127,12 +113,12 @@ public class ChannelMiddlemanSample : ITutorialSample
             for (int value = firstStart; value <= firstEnd; ++value)
             {
                 await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                await _channel.Writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
+                await targetBlock.SendAsync(value, cancellationToken).ConfigureAwait(false);
             }
             for (int value = secondStart; value <= secondEnd; ++value)
             {
                 await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-                await _channel.Writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
+                await targetBlock.SendAsync(value, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -142,7 +128,6 @@ public class ChannelMiddlemanSample : ITutorialSample
         /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
         public async Task Run(CancellationToken cancellationToken)
         {
-            // For the run, we have basically the same code to launch the producers as before, but now isolated and OOP-ish
             List<Task> productionTasks = [];
             for (int index = 0; index < count; ++index)
             {
@@ -153,141 +138,10 @@ public class ChannelMiddlemanSample : ITutorialSample
                     cancellationToken));
             }
             await Task.WhenAll(productionTasks).ConfigureAwait(false);
-            _channel.Writer.Complete();
         }
     }
 
-    /// <summary>
-    /// Middleman that intercepts messages between the primary producer and consumers
-    /// </summary>
-    public class Middleman
-    {
-        // We add a new Middleman class that is a little bit consumer, a little bit producer
 
-        /// <summary>
-        /// The channel used to communicate the values
-        /// </summary>
-        private readonly Channel<int> _channel = Channel.CreateUnbounded<int>();
-
-        /// <summary>
-        /// Reads all values as an asynchronous collection.
-        /// </summary>
-        /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        /// <returns>A <see cref="IAsyncEnumerable{Int32}"/> that iterates each time a new value is produced.</returns>
-        public IAsyncEnumerable<int> ReadAllAsync(CancellationToken cancellationToken) =>
-            _channel.Reader.ReadAllAsync(cancellationToken);
-
-        /// <summary>
-        /// The last value
-        /// </summary>
-        private int? _lastValue = null;
-
-        /// <summary>
-        /// The synchronize
-        /// </summary>
-        private readonly SemaphoreSlim _synchronize = new(1);
-
-        /// <summary>
-        /// Consumes the specified values.
-        /// </summary>
-        /// <param name="values">The values.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        private async Task Consume(
-            IAsyncEnumerable<int> values,
-            CancellationToken cancellationToken)
-        {
-            await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
-            {
-                await _synchronize.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
-                {
-                    if (_lastValue is null)
-                    {
-                        _lastValue = value;
-                    }
-                    else
-                    {
-                        await _channel.Writer.WriteAsync(
-                            (100000 * _lastValue.Value) + value,
-                            cancellationToken).ConfigureAwait(false);
-                        _lastValue = null;
-                    }
-                }
-                finally
-                {
-                    _synchronize.Release();
-                }
-            }
-        }
-
-
-        /// <summary>
-        /// Intercepts the asynchronous.
-        /// </summary>
-        /// <param name="values">The values.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        public async Task Intercept(
-            IAsyncEnumerable<int> values,
-            CancellationToken cancellationToken)
-        {
-            List<Task> consumers = [];
-            for (int index = 1; index <= 666; ++index)
-            {
-                consumers.Add(Consume(
-                    values,
-                    cancellationToken));
-            }
-            await Task.WhenAll(consumers).ConfigureAwait(false);
-            _channel.Writer.Complete();
-
-        }
-    }
-
-    /// <summary>
-    /// Consumer class used to print values to the screen
-    /// </summary>
-    public class Consumer
-    {
-
-        /// <summary>
-        /// Consumes the collection, printing each value to the screen
-        /// </summary>
-        /// <param name="identifier">The identifier to print as the name of the current instance.</param>
-        /// <param name="values">The values to print to the screen.</param>
-        /// <param name="cancellationToken">The cancellation token used to signal that a process should not complete.</param>
-        private async Task Consume(
-            string identifier,
-            IAsyncEnumerable<int> values,
-            CancellationToken cancellationToken)
-        {
-            Console.WriteLine($"Writing values: {identifier} / {Environment.CurrentManagedThreadId}");
-
-            await foreach (int value in values.WithCancellation(cancellationToken).ConfigureAwait(false))
-            {
-                Console.WriteLine($"{identifier} / {Environment.CurrentManagedThreadId} => {value}");
-            }
-
-            Console.WriteLine($"Fin {identifier} / {Environment.CurrentManagedThreadId}");
-        }
-
-        /// <summary>
-        /// Runs the asynchronous.
-        /// </summary>
-        /// <param name="values">The values.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        public async Task Run(
-            IAsyncEnumerable<int> values,
-            CancellationToken cancellationToken)
-        {
-            List<Task> consumers = [];
-            for (int index = 1; index <= Environment.ProcessorCount * 2; ++index)
-            {
-                string identifier = $"Action {index}";
-                consumers.Add(Consume(identifier, values, cancellationToken));
-            }
-            await Task.WhenAll(consumers).ConfigureAwait(false);
-        }
-    }
 
     /// <summary>
     /// Runs sample code for the sample.
@@ -296,12 +150,55 @@ public class ChannelMiddlemanSample : ITutorialSample
     public async Task Run(
         CancellationToken cancellationToken)
     {
-        Producer producer = new(55);
-        Consumer consumer = new();
-        // We add the middleman and inject it between the producer and consumer
-        Middleman middleman = new();
-        _ = consumer.Run(middleman.ReadAllAsync(cancellationToken), cancellationToken);
-        _ = middleman.Intercept(producer.ReadAllAsync(cancellationToken), cancellationToken);
+        DataflowBlockOptions blockOptions = new()
+        {
+            CancellationToken = cancellationToken,
+            BoundedCapacity = Environment.ProcessorCount * 2,
+            MaxMessagesPerTask = 5
+        };
+
+        GroupingDataflowBlockOptions groupingOptions = new()
+        {
+            CancellationToken = cancellationToken,
+            BoundedCapacity = Environment.ProcessorCount * 2,
+            Greedy = true,
+            MaxMessagesPerTask = 5
+        };
+
+        ExecutionDataflowBlockOptions executionOptions = new()
+        {
+            CancellationToken = cancellationToken,
+            BoundedCapacity = Environment.ProcessorCount * 2,
+            SingleProducerConstrained = false,
+            MaxMessagesPerTask = 5,
+            MaxDegreeOfParallelism = Environment.ProcessorCount * 2
+        };
+
+        BufferBlock<int> buffer = new(blockOptions);
+
+        BatchBlock<int> batcher = new(2, groupingOptions);
+        buffer.LinkTo(batcher);
+
+        TransformBlock<int[], int> transform = new(values =>
+            (100000 * values[0]) + (values.Length > 0 ? values[1] : 0), executionOptions);
+        batcher.LinkTo(transform);
+
+        BroadcastBlock<int> broadcast = new(null, blockOptions);
+        transform.LinkTo(broadcast);
+
+        ActionBlock<int> writer = new(value =>
+            Console.WriteLine($"Writer 1 / {Environment.CurrentManagedThreadId} => {value}", executionOptions));
+        broadcast.LinkTo(writer);
+
+        ActionBlock<int> writer2 = new(value =>
+            Console.WriteLine($"Writer 2 / {Environment.CurrentManagedThreadId} => {value}", executionOptions));
+        broadcast.LinkTo(writer2);
+
+        ActionBlock<int> writer3 = new(value =>
+            Console.WriteLine($"Writer 3 / {Environment.CurrentManagedThreadId} => {value}", executionOptions));
+        broadcast.LinkTo(writer3);
+
+        Producer producer = new(55, buffer);
         
         List<Task> tasks = [producer.Run(cancellationToken)];
 
@@ -316,6 +213,14 @@ public class ChannelMiddlemanSample : ITutorialSample
         tasks.Add(backThreadSource.Task);
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        buffer.Complete();
+        batcher.Complete();
+        transform.Complete();
+        broadcast.Complete();
+        writer.Complete();
+        writer2.Complete();
+        writer3.Complete();
 
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
 

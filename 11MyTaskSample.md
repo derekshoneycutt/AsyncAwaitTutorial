@@ -155,3 +155,8 @@ asynchronously, and in fact we are exhausting the thread pool in the process.
 1. [Standard Channels](25ChannelsSample.md)
 1. [Structuring a Channels Pipeline](26StructuredChannelsSample.md)
 1. [Extending Channels Pipelines with a Middleman](27ChannelMiddlemanSample.md)
+
+##### 7. Dataflow
+
+28. [Introduce Dataflow in the Middleman](28DataFlowMiddlemanSample.md)
+1. [Replace Channels Pipeline with Dataflow Blocks](29DataFlowCompleteSample.md)
