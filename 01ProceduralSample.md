@@ -61,6 +61,8 @@ run this, we have to wait for it to complete. Furthermore, this single method bo
 produces values and displays them, whereas we would like to decouple that
 functionality.
 
+[Full Sample](01ProceduralSample.cs)
+
 [Home](/)
 
-[Next](02. ListProducerSample.md)
+[Next](02ListProducerSample.md)
