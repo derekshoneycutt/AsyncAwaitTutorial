@@ -10,4 +10,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="03StateMachineProducerSample.md" />
+  </ItemGroup>
+
 </Project>
