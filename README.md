@@ -36,7 +36,7 @@ for topics with clear familiarity.
 
 ### 1. Simple Procedural Code
 
-[Simple Procedural Code](01. ProceduralSample.md)
+[Simple Procedural Code](./01. ProceduralSample.md)
 
 First, we need to create some scaffolding. We create a new C# Console Application project,
 and we can use top level statements in Program.cs.
